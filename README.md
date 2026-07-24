@@ -10,10 +10,16 @@ api/   FastAPI backend + Discord bot (one process)  → Render
 web/   Vite + React + TypeScript dashboard          → Vercel
 ```
 
+**Status:** scaffold. Core infra, DB schema, migration `0001`, and the Foundry client
+are wired; `/health` works. The three feature modules (`scheduling`, `resources`,
+`finance`) and the Discord bot are still stubs — their `/api/*` routes raise
+`NotImplementedError` until each owner implements them.
+
 ## Prerequisites
 
 - Python 3.12 · Node 18+ · a PostgreSQL 16 database (Supabase free tier)
-- `uv` recommended for the backend (`pip`/`venv` work as a substitute)
+- The steps below use stock `python3 -m venv` + `pip`. `uv` is optional (faster) —
+  install with `brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh | sh`.
 
 ## Database setup (once)
 
@@ -34,9 +40,10 @@ cd api
 cp .env.example .env          # fill in DATABASE_URL (required to start), then the rest
 az login                      # Foundry auth is Entra ID, not an API key (skip if not using the LLM)
 
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-# no uv? →  python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+# have uv? faster:  uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+# Python 3.14+ locally but project targets 3.12? use  python3.12 -m venv .venv  (brew install python@3.12)
 
 alembic upgrade head          # applies schema.sql (all tables, indexes, constraints)
 python scripts/seed.py        # optional: load demo data (DEV database only)
@@ -73,7 +80,9 @@ Backend (`api/.env`) — see `api/.env.example`:
 | Var | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | yes | Supabase Shared Pooler URL; rewritten for asyncpg at load |
-| `FOUNDRY_PROJECT_ENDPOINT` / `FOUNDRY_AGENT_NAME` / `FOUNDRY_AGENT_VERSION` | for LLM features | Foundry project endpoint + hosted agent reference. Auth is Entra ID (`az login`), **not** an API key — see below |
+| `ORG_ID` | no | The single org this deployment serves; seed creates the org with this id. Defaults to a fixed UUID |
+| `FOUNDRY_PROJECT_ENDPOINT` / `FOUNDRY_AGENT_NAME` / `FOUNDRY_AGENT_VERSION` | for LLM features | Foundry project endpoint + hosted agent reference. Auth is Entra ID, **not** an API key |
+| `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | Foundry on Render only | Service-principal login for `DefaultAzureCredential`. Local dev uses `az login` instead |
 | `DISCORD_BOT_TOKEN` / `DISCORD_TEST_GUILD_ID` | for the bot | |
 | `API_KEY` | for dashboard auth | sent as the `X-API-Key` header |
 | `CORS_ORIGINS` | no | defaults to `http://localhost:5173` |

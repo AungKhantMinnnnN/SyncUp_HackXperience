@@ -18,9 +18,13 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message
 async def lifespan(app: FastAPI):
     # APScheduler (hold-expiry, reminders) starts here once app/jobs/scheduler.py lands.
     # from app.jobs.scheduler import start_jobs; start_jobs()
-    bot_task = await start_bot()
+    # One bot per token, only when enabled — prevents duplicate gateway sessions.
+    bot_task = None
+    if settings.enable_bot and settings.discord_bot_token:
+        bot_task = await start_bot()
     yield
-    await stop_bot(bot_task)
+    if bot_task is not None:
+        await stop_bot(bot_task)
 
 
 app = FastAPI(title="SyncUp", lifespan=lifespan)
@@ -44,6 +48,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# Feature routers mount here as they land:
-# from app.features.scheduling.router import router as scheduling_router
-# app.include_router(scheduling_router, prefix="/api/scheduling", tags=["scheduling"])
+from app.features.scheduling.router import router as scheduling_router  # noqa: E402
+
+app.include_router(scheduling_router, prefix="/api/scheduling", tags=["scheduling"])
+# resources + finance routers mount here as they land.
