@@ -36,11 +36,10 @@ export function App() {
       <header className="topbar">
         <div className="topline">
           <div>
-            <div className="eyebrow">SyncUp · Operations Console</div>
-            <h1 className="thesis">{org || "SyncUp"}</h1>
-            <p className="tagline">
-              One <span className="accent">conflict</span> primitive · three domains
-            </p>
+              <h1 className="thesis">{org ? `SyncUp • ${org}` : "SyncUp"}</h1>
+              <p className="tagline">
+                Organization Console
+              </p>
           </div>
           <div className="caught">
             <b>{caught ?? "—"}</b>
