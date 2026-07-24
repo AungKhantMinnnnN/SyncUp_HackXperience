@@ -13,6 +13,10 @@ from app.features.scheduling.schemas import (
     AvailabilityCell,
     AvailabilityOut,
     BudgetOut,
+    BusyOut,
+    CalendarOut,
+    EventAllocation,
+    MemberOut,
     ConfirmIn,
     CreateRequestIn,
     CreateRequestOut,
@@ -72,6 +76,22 @@ async def get_org(db: AsyncSession = Depends(get_db)):
     if org is None:
         raise HTTPException(404, detail={"detail": "Org not found", "code": "not_found"})
     return OrgOut(id=org.id, name=org.name, timezone=org.timezone)
+
+
+@router.get("/calendar", response_model=CalendarOut)
+async def get_calendar(
+    frm: datetime = Query(alias="from"),
+    to: datetime = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    members, blocks = await service.calendar(db, frm, to)
+    return CalendarOut(
+        members=[MemberOut(id=m.id, full_name=m.full_name, role=m.role) for m in members],
+        busy=[
+            BusyOut(member_id=b.member_id, kind=b.kind, start_utc=b.start_utc, end_utc=b.end_utc)
+            for b in blocks
+        ],
+    )
 
 
 @router.post("/requests", response_model=CreateRequestOut)
@@ -134,14 +154,22 @@ async def get_events(
     to: datetime = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    return [
-        EventListItem(
-            id=e.id,
-            title=e.title,
-            start_utc=e.start_utc,
-            end_utc=e.end_utc,
-            status=e.status,
-            venue_id=e.venue_id,
+    out = []
+    for e in await service.list_events(db, frm, to):
+        members, items = await service.event_details(db, e.id)
+        out.append(
+            EventListItem(
+                id=e.id,
+                title=e.title,
+                start_utc=e.start_utc,
+                end_utc=e.end_utc,
+                status=e.status,
+                venue_id=e.venue_id,
+                members=members,
+                items=[
+                    EventAllocation(item_name=i.item_name, quantity=i.quantity, org_owned=i.org_owned)
+                    for i in items
+                ],
+            )
         )
-        for e in await service.list_events(db, frm, to)
-    ]
+    return out

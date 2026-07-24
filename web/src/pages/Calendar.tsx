@@ -1,57 +1,45 @@
-// Scheduling planner: describe a meeting -> ranked conflict-free slots -> confirm.
 import { useEffect, useState } from "react";
+import { MemberCalendar } from "../components/MemberCalendar";
 import {
   confirmProposal,
   createRequest,
-  getOrg,
+  getEvents,
   getRequest,
+  type EventItem,
   type EventPlan,
   type Proposal,
   type RequestStatus,
 } from "../api/scheduling";
+import { DAY, fmtTime } from "../util";
 
-const fmt = (iso: string, tz: string) =>
-  new Date(iso).toLocaleString("en-SG", {
-    timeZone: tz,
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const hhmm = (iso: string, tz: string) =>
+  new Date(iso).toLocaleTimeString("en-SG", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
 
-const card: React.CSSProperties = {
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  padding: 14,
-  marginBottom: 10,
-};
-
-export function Calendar() {
+export function Calendar({ tz }: { tz: string }) {
+  const [events, setEvents] = useState<EventItem[]>([]);
   const [prompt, setPrompt] = useState("2 hour exec meeting next week, before Friday evening");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [req, setReq] = useState<RequestStatus | null>(null);
   const [confirmed, setConfirmed] = useState<EventPlan | null>(null);
-  // Org timezone from the API; browser tz until it loads.
-  const [tz, setTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
 
   useEffect(() => {
-    getOrg()
-      .then((o) => setTz(o.timezone))
+    const now = new Date();
+    getEvents(now.toISOString(), new Date(now.getTime() + 14 * DAY).toISOString())
+      .then(setEvents)
       .catch(() => {});
   }, []);
 
-  async function submit() {
+  async function findTimes() {
     setBusy(true);
-    setError(null);
+    setErr(null);
     setReq(null);
     setConfirmed(null);
     try {
       const { request_id } = await createRequest(prompt);
-      setReq(await getRequest(request_id)); // proposals are ready by the time this returns
+      setReq(await getRequest(request_id));
     } catch (e) {
-      setError((e as Error).message);
+      setErr((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -59,78 +47,134 @@ export function Calendar() {
 
   async function confirm(p: Proposal) {
     setBusy(true);
-    setError(null);
+    setErr(null);
     try {
       setConfirmed(await confirmProposal(p.id));
     } catch (e) {
-      setError((e as Error).message);
+      setErr((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section>
-      <h2>Plan a meeting</h2>
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        rows={2}
-        style={{ width: "100%", padding: 8, fontFamily: "inherit", fontSize: 14 }}
-      />
-      <button onClick={submit} disabled={busy || !prompt.trim()} style={{ marginTop: 8, padding: "8px 16px" }}>
-        {busy ? "Working…" : "Find times"}
-      </button>
-
-      {error && <p style={{ color: "#b00" }}>Error: {error}</p>}
-
-      {confirmed && (
-        <div style={{ ...card, borderColor: "#2E7D4F", background: "#f2fbf5", marginTop: 16 }}>
-          <strong>✅ Confirmed — {confirmed.event.title || "Event"}</strong>
-          <div>{fmt(confirmed.event.start_utc, tz)} – {fmt(confirmed.event.end_utc, tz)}</div>
-          <div style={{ color: "#555", fontSize: 13 }}>
-            Budget: {confirmed.budget.verdict} · Reservations: {confirmed.reservations.reservation_ids.length}
-          </div>
+    <>
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Team availability</h2>
+          <span className="tag">by member · monthly</span>
         </div>
-      )}
+        <p className="sub">
+          Each member's commitments — class, exam, work, club, personal. Every block is a claim on
+          someone's time; the scheduler only proposes windows with no overlap.
+        </p>
+        <MemberCalendar tz={tz} />
+      </div>
 
-      {req && !confirmed && (
-        <div style={{ marginTop: 16 }}>
-          {req.parsed_constraints && (
-            <details style={{ marginBottom: 12, color: "#555" }}>
-              <summary>What we understood</summary>
-              <pre style={{ fontSize: 12, overflowX: "auto" }}>
-                {JSON.stringify(req.parsed_constraints, null, 2)}
-              </pre>
-            </details>
-          )}
-          {req.proposals.length === 0 ? (
-            <p>No conflict-free slots in that window — try widening it.</p>
-          ) : (
-            req.proposals.map((p) => (
-              <div key={p.id} style={card}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Plan a meeting</h2>
+          <span className="tag">plain english → ranked slots</span>
+        </div>
+        <textarea
+          className="prompt"
+          rows={2}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+        <div style={{ marginTop: 10 }}>
+          <button className="btn primary" onClick={findTimes} disabled={busy || !prompt.trim()}>
+            {busy ? "Working…" : "Find times"}
+          </button>
+        </div>
+
+        {err && <p className="err">Error: {err}</p>}
+
+        {confirmed && (
+          <div className="callout" style={{ borderColor: "var(--ok)", background: "#f0faf6", marginTop: 16 }}>
+            <div className="tag" style={{ color: "var(--ok)" }}>Confirmed</div>
+            <h3>{confirmed.event.title || "Event"}</h3>
+            <p>
+              {fmtTime(confirmed.event.start_utc, tz)} · budget {confirmed.budget.verdict} ·{" "}
+              {confirmed.reservations.reservation_ids.length} resources held
+            </p>
+          </div>
+        )}
+
+        {req && !confirmed && (
+          <div className="row-cards" style={{ marginTop: 16 }}>
+            {req.proposals.length === 0 ? (
+              <p className="muted">No conflict-free slots in that window — try widening it.</p>
+            ) : (
+              req.proposals.map((p) => (
+                <div className="pcard" key={p.id}>
                   <div>
-                    <strong>#{p.rank} · {fmt(p.start_utc, tz)}</strong>
-                    <div style={{ color: "#555", fontSize: 13 }}>
+                    <div className="when">
+                      #{p.rank} · {fmtTime(p.start_utc, tz)}
+                    </div>
+                    <div className="meta">
                       {p.attendance_pct?.toFixed(0)}% weighted attendance
                       {p.conflicts.length > 0 && ` · ${p.conflicts.join(", ")}`}
                     </div>
                     {p.available_members.length > 0 && (
-                      <div style={{ color: "#2E7D4F", fontSize: 13 }}>
-                        ✅ Available: {p.available_members.join(", ")}
-                      </div>
+                      <div className="free">✓ {p.available_members.join(", ")}</div>
                     )}
                   </div>
-                  <button onClick={() => confirm(p)} disabled={busy} style={{ padding: "6px 14px" }}>
+                  <button className="btn" onClick={() => confirm(p)} disabled={busy}>
                     Confirm
                   </button>
                 </div>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Upcoming events</h2>
+          <span className="tag">next 14 days · {events.length}</span>
         </div>
-      )}
-    </section>
+        {events.length === 0 ? (
+          <p className="muted">No events in the next 14 days.</p>
+        ) : (
+          <div className="row-cards">
+            {events.map((e) => (
+              <div className="ecard" key={e.id}>
+                <div className="ecard-head">
+                  <div className="when">{e.title}</div>
+                  <span className={`badge ${e.status === "confirmed" ? "ok" : "ink"}`}>
+                    {e.status}
+                  </span>
+                </div>
+                <div className="meta">
+                  {fmtTime(e.start_utc, tz)} – {hhmm(e.end_utc, tz)}
+                </div>
+                {e.members.length > 0 && (
+                  <div className="ecard-row">
+                    <span className="k">Members</span>
+                    <span>{e.members.length} · {e.members.join(", ")}</span>
+                  </div>
+                )}
+                {e.items.length > 0 && (
+                  <div className="ecard-row">
+                    <span className="k">Items</span>
+                    <span>
+                      {e.items.map((it, i) => (
+                        <span key={i} className={it.org_owned ? "" : "buy"}>
+                          {i > 0 && " · "}
+                          {it.item_name} ×{it.quantity}
+                          {!it.org_owned && " (buy)"}
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

@@ -196,5 +196,5 @@ if __name__ == "__main__":
     assert out, "expected some slots"
     assert out[0].score == 100.0, out[0]  # a fully-free slot tops the ranking
     assert all(not (s.start < base + timedelta(hours=2) and base + timedelta(hours=1) < s.end)
-               for s in out), "a slot overlapping the required member's class survived"
+            for s in out), "a slot overlapping the required member's class survived"
     print(f"ok: {len(out)} ranked slots, top score {out[0].score}")

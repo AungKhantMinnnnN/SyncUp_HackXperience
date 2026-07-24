@@ -67,7 +67,6 @@ npm run dev                   # http://localhost:5173
 ```bash
 # backend (from api/)
 ruff format . && ruff check . && mypy app
-pytest
 
 # frontend (from web/)
 npm run typecheck && npm run build

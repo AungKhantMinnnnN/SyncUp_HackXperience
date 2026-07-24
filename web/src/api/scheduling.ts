@@ -44,3 +44,30 @@ export const confirmProposal = (proposalId: string) =>
     method: "POST",
     body: JSON.stringify({}),
   });
+
+export type AvailabilityCell = { day: string; hour: number; free_count: number };
+export type Availability = { member_count: number; cells: AvailabilityCell[] };
+export type EventAllocation = { item_name: string; quantity: number; org_owned: boolean };
+export type EventItem = {
+  id: string;
+  title: string;
+  start_utc: string;
+  end_utc: string;
+  status: string;
+  venue_id: string | null;
+  members: string[];
+  items: EventAllocation[];
+};
+
+export const getAvailability = (from: string, to: string) =>
+  api<Availability>(`${BASE}/availability?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+
+export const getEvents = (from: string, to: string) =>
+  api<EventItem[]>(`${BASE}/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+
+export type MemberInfo = { id: string; full_name: string; role: string };
+export type BusyBlock = { member_id: string; kind: string; start_utc: string; end_utc: string };
+export type CalendarData = { members: MemberInfo[]; busy: BusyBlock[] };
+
+export const getCalendar = (from: string, to: string) =>
+  api<CalendarData>(`${BASE}/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
