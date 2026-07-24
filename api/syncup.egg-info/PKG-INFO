@@ -1,0 +1,23 @@
+Metadata-Version: 2.4
+Name: syncup
+Version: 0.1.0
+Summary: AI chief of staff for university student organizations, driven from Discord.
+Requires-Python: >=3.12
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: sqlalchemy[asyncio]>=2.0
+Requires-Dist: asyncpg
+Requires-Dist: alembic
+Requires-Dist: pydantic>=2
+Requires-Dist: pydantic-settings
+Requires-Dist: discord.py
+Requires-Dist: openai
+Requires-Dist: azure-ai-projects>=2.1.0
+Requires-Dist: azure-identity
+Requires-Dist: apscheduler
+Requires-Dist: httpx
+Provides-Extra: dev
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"

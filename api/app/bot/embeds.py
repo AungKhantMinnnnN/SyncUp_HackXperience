@@ -54,3 +54,43 @@ def packing_list_embed(event_title: str, items: list[dict]) -> discord.Embed:
             line += f" — {item['note']}"
         embed.add_field(name=item["name"], value=line, inline=True)
     return embed
+
+_VERDICT_COLOR = {"OK": SUCCESS_COLOR, "TIGHT": WARNING_COLOR, "OVER": ERROR_COLOR}
+
+
+def budget_embed(
+    *,
+    title: str,
+    lines: list,  # BudgetLineItem rows — category, description, unit_cost, quantity, line_total
+    estimated_total,
+    verdict: str,
+    stated_cap=None,
+    remaining=None,
+    suggested_cuts: list[str] | None = None,
+) -> discord.Embed:
+    embed = discord.Embed(title=title, color=_VERDICT_COLOR.get(verdict, BRAND_COLOR))
+    embed.set_footer(text=FOOTER_TEXT)
+
+    for l in lines:
+        label = l.description or l.category
+        embed.add_field(
+            name=f"{l.category} — {label}" if l.description else l.category,
+            value=f"${l.unit_cost} × {l.quantity} = **${l.line_total}**",
+            inline=False,
+        )
+
+    summary = f"**Estimated total:** ${estimated_total}\n**Verdict:** {verdict}"
+    if stated_cap is not None:
+        summary += f"\n**Stated cap:** ${stated_cap}"
+    if remaining is not None:
+        summary += f"\n**Semester remaining after this event:** ${remaining}"
+    embed.add_field(name="Summary", value=summary, inline=False)
+
+    if suggested_cuts:
+        embed.add_field(
+            name="Suggested cuts",
+            value="\n".join(f"• {c}" for c in suggested_cuts),
+            inline=False,
+        )
+
+    return embed

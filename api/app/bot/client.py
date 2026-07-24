@@ -7,6 +7,7 @@ from discord import app_commands
 
 from app.bot.commands import plan as plan_commands
 from app.bot.commands import resources as resources_commands
+from app.bot.commands import budget as budget_commands
 from app.config import settings
 
 logger = logging.getLogger("syncup.bot")
@@ -19,6 +20,7 @@ tree = app_commands.CommandTree(bot)
 
 plan_commands.register(tree)
 resources_commands.register(tree)
+budget_commands.register(tree)
 
 
 @bot.event
