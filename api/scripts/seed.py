@@ -4,9 +4,12 @@ state in seconds. Deterministic (per-member fixed RNG) so the demo reproduces ex
 Single-org build: one organization (id pinned to settings.org_id), 10 members,
 3 venues, ~130 busy_blocks over 3 weeks, plus past completed events (with RSVPs,
 incl. repeat no-shows to exercise fairness debt) and upcoming confirmed events
-(for /events + back-to-back penalties).
+(for /events + back-to-back penalties). Also seeds a small resources catalogue and
+two reservations (Member B) on the same org — one exclusive item fully booked, one
+pooled item partially booked, so /availability and the conflict feed have something
+real to show without needing a live event yet.
 
-Resources/finance demo data (reservations, budgets) land once B/C models exist.
+Finance demo data (budgets) lands once C's models exist.
 
 Run:  python scripts/seed.py   (against the DEV Supabase project only)
 """
@@ -23,6 +26,7 @@ from app.config import settings
 from app.core.time import now_utc
 from app.db import SessionLocal
 from app.models.org import Member, Organization, Venue
+from app.models.resources import Resource, ResourceReservation
 from app.models.scheduling import BusyBlock, Event, EventAttendee
 
 ORG_NAME = "Chess Club"
@@ -51,6 +55,16 @@ VENUES = [
 ]
 
 BUSY_KINDS = ["class", "class", "class", "work", "club", "personal"]
+
+# (name, category, quantity_total, exclusive)
+RESOURCES = [
+    ("Projector", "AV", 1, True),
+    ("Wireless mic", "AV", 4, False),
+    ("Folding chair", "furniture", 120, False),
+    ("Sign-in table", "furniture", 2, False),
+    ("Event banner", "signage", 3, False),
+    ("Portable speaker", "AV", 2, False),
+]
 
 
 def _week_monday_local():
@@ -165,10 +179,36 @@ async def seed() -> None:
                 for ev, m, status in rsvps
             )
 
+            resources = {
+                name: Resource(org_id=org.id, name=name, category=cat, quantity_total=qty, exclusive=excl)
+                for name, cat, qty, excl in RESOURCES
+            }
+            db.add_all(resources.values())
+            await db.flush()  # assign resource ids
+
+            res_start = now_utc() + timedelta(days=1)
+            res_end = res_start + timedelta(hours=2)
+            db.add_all([
+                # Projector, fully booked — /availability and /reservations should
+                # show this as a hard conflict for anyone checking the same window.
+                ResourceReservation(
+                    resource_id=resources["Projector"].id, event_id=None,
+                    quantity=1, start_utc=res_start, end_utc=res_end,
+                    exclusive=True, status="confirmed",
+                ),
+                # Mics, partially booked — 3 of 4 reserved in the same window, so a
+                # request for 2 during it should come back PARTIAL, not OK or CONFLICT.
+                ResourceReservation(
+                    resource_id=resources["Wireless mic"].id, event_id=None,
+                    quantity=3, start_utc=res_start, end_utc=res_end,
+                    exclusive=False, status="held",
+                ),
+            ])
+
     print(
         f"seed: org={ORG_NAME} ({settings.org_id}), {len(members)} members, "
         f"{len(venues)} venues, {len(blocks)} busy_blocks, {len(events)} events, "
-        f"{len(rsvps)} attendees"
+        f"{len(rsvps)} attendees, {len(resources)} resources"
     )
 
 

@@ -19,6 +19,7 @@ class EventView:
     end_utc: datetime
     expected_attendance: int | None = None
     venue_id: UUID | None = None
+    description: str | None = None
 
 
 @dataclass
@@ -29,9 +30,21 @@ class UnownedItem:
 
 
 @dataclass
+class ConflictView:
+    resource_name: str
+    event_id: UUID | None = None  # the event whose request fell short — the "requesting event"
+    requested: int = 0
+    available: int = 0
+    shortfall: int = 0
+    blocking_event_title: str | None = None  # needs a join to events; None until scheduling lands
+    suggested_alternative: str | None = None
+
+
+@dataclass
 class ReservationPlan:
     event_id: UUID
     reservation_ids: list[UUID] = field(default_factory=list)
+    conflicts: list[ConflictView] = field(default_factory=list)
     unowned_items: list[UnownedItem] = field(default_factory=list)
     venue_cost: Decimal = Decimal("0.00")
 

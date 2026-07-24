@@ -41,7 +41,10 @@ class Settings(BaseSettings):
 
     @property
     def cors_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        # Browsers never send a trailing slash in the Origin header (it's an origin,
+        # not a URL), so a config value like "http://localhost:5173/" would silently
+        # fail to match every request. Strip it defensively.
+        return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
 
 
 settings = Settings()  # type: ignore[call-arg]
