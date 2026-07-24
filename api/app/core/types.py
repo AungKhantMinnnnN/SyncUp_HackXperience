@@ -54,4 +54,6 @@ class BudgetDraft:
     event_budget_id: UUID
     estimated_total: Decimal
     stated_cap: Decimal | None
-    verdict: str  # e.g. "within_cap" | "over_cap" | "over_allocation"
+    verdict: str  # e.g. "OK" | "TIGHT" | "OVER"
+    remaining: Decimal | None = None  # semester balance after this event, if computed
+    suggested_cuts: list[str] | None = None  # advisory only; None unless verdict == "OVER"

@@ -27,12 +27,6 @@ class Budget(Base):
     currency: Mapped[str] = mapped_column(CHAR(3), nullable=False, default="USD")
     created_at: Mapped[datetime] = created_at()
 
-    def __repr__(self) -> str:
-        return (
-            f"<Budget id={self.id} org_id={self.org_id} "
-            f"semester={self.semester!r} total_allocated={self.total_allocated}>"
-        )
-
 
 class EventBudget(Base):
     __tablename__ = "event_budgets"
@@ -56,12 +50,6 @@ class EventBudget(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     created_at: Mapped[datetime] = created_at()
 
-    def __repr__(self) -> str:
-        return (
-            f"<EventBudget id={self.id} event_id={self.event_id} "
-            f"status={self.status!r} estimated_total={self.estimated_total}>"
-        )
-
 
 class BudgetLineItem(Base):
     __tablename__ = "budget_line_items"
@@ -84,12 +72,6 @@ class BudgetLineItem(Base):
     line_total: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     source: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at()
-
-    def __repr__(self) -> str:
-        return (
-            f"<BudgetLineItem id={self.id} category={self.category!r} "
-            f"quantity={self.quantity} line_total={self.line_total}>"
-        )
 
 
 class Expense(Base):
@@ -116,9 +98,3 @@ class Expense(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     spent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
-
-    def __repr__(self) -> str:
-        return (
-            f"<Expense id={self.id} event_budget_id={self.event_budget_id} "
-            f"amount={self.amount} status={self.status!r}>"
-        )

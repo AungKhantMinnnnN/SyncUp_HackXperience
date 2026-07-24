@@ -3,6 +3,7 @@
 from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
+from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, field_validator
 
@@ -58,6 +59,7 @@ class LineItemOut(BaseModel):
     unit_cost: MoneyDecimal
     quantity: int
     line_total: MoneyDecimal
+    source: str | None  # "ai" | "manual" | None — powers the AI-suggested badge
 
 
 class EventBudgetOut(BaseModel):
@@ -147,3 +149,39 @@ class SuggestedCut(BaseModel):
 
 class SuggestedCutList(BaseModel):
     cuts: list[SuggestedCut]
+
+class HeadroomOut(BaseModel):
+    org_id: UUID
+    semester: str
+    allocated: MoneyDecimal
+    committed: MoneyDecimal
+    actual: MoneyDecimal
+    remaining: MoneyDecimal
+    verdict: Verdict
+
+
+class BurndownPoint(BaseModel):
+    date: date
+    cumulative_committed: MoneyDecimal
+    cumulative_actual: MoneyDecimal
+
+
+class BurndownOut(BaseModel):
+    org_id: UUID
+    semester: str
+    allocated: MoneyDecimal
+    points: list[BurndownPoint]
+
+
+class VarianceLine(BaseModel):
+    event_title: str
+    category: str
+    description: str | None
+    estimated: MoneyDecimal
+    actual: MoneyDecimal
+    variance: MoneyDecimal
+
+
+class VarianceOut(BaseModel):
+    org_id: UUID
+    lines: list[VarianceLine]
