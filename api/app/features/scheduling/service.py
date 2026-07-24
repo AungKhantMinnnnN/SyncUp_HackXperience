@@ -222,8 +222,51 @@ async def list_events(db: AsyncSession, frm: datetime, to: datetime) -> list[Eve
     return list(rows.scalars())
 
 
+async def event_details(db: AsyncSession, event_id: UUID):
+    """Attendee names + allocated packing-list items for one event. Packing items come
+    from resources (scheduling MAY import resources; never the reverse)."""
+    members = list(
+        (
+            await db.execute(
+                select(Member.full_name)
+                .join(EventAttendee, EventAttendee.member_id == Member.id)
+                .where(EventAttendee.event_id == event_id)
+                .order_by(Member.full_name)
+            )
+        ).scalars()
+    )
+    items = await resources_service.list_packing_list_items(db, event_id)
+    return members, items
+
+
 async def get_org(db: AsyncSession) -> Organization | None:
     return await db.get(Organization, settings.org_id)
+
+
+async def calendar(
+    db: AsyncSession, frm: datetime, to: datetime
+) -> tuple[list[Member], list[BusyBlock]]:
+    """Members + their busy blocks in [frm, to) — powers the per-member month calendar."""
+    members = list(
+        (
+            await db.execute(
+                select(Member).where(Member.org_id == settings.org_id).order_by(Member.full_name)
+            )
+        ).scalars()
+    )
+    ids = [m.id for m in members]
+    blocks = list(
+        (
+            await db.execute(
+                select(BusyBlock).where(
+                    BusyBlock.member_id.in_(ids),
+                    BusyBlock.end_utc > frm,
+                    BusyBlock.start_utc < to,
+                )
+            )
+        ).scalars()
+    )
+    return members, blocks
 
 
 async def get_request(db: AsyncSession, request_id: UUID) -> SchedulingRequest | None:

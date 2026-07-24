@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.bot.client import start_bot, stop_bot
 from app.config import settings
+from app.features.finance.router import router as finance_router
 from app.features.resources.router import router as resources_router
 from app.features.scheduling.router import router as scheduling_router
 from app.jobs.scheduler import start_jobs, stop_jobs
@@ -65,4 +66,5 @@ async def health() -> dict[str, str]:
 
 app.include_router(scheduling_router, prefix="/api/scheduling", tags=["scheduling"])
 app.include_router(resources_router, prefix="/api/resources", tags=["resources"])
+app.include_router(finance_router, prefix="/api/finance", tags=["finance"])
 # finance router mounts here as it lands.

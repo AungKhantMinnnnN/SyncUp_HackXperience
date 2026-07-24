@@ -27,6 +27,24 @@ class OrgOut(BaseModel):
     timezone: str
 
 
+class MemberOut(BaseModel):
+    id: UUID
+    full_name: str
+    role: str
+
+
+class BusyOut(BaseModel):
+    member_id: UUID
+    kind: str
+    start_utc: datetime
+    end_utc: datetime
+
+
+class CalendarOut(BaseModel):
+    members: list[MemberOut] = []
+    busy: list[BusyOut] = []
+
+
 class CreateRequestIn(BaseModel):
     prompt: str
     member_id: UUID | None = None
@@ -100,6 +118,12 @@ class AvailabilityOut(BaseModel):
     cells: list[AvailabilityCell] = []
 
 
+class EventAllocation(BaseModel):
+    item_name: str
+    quantity: int
+    org_owned: bool
+
+
 class EventListItem(BaseModel):
     id: UUID
     title: str
@@ -107,3 +131,5 @@ class EventListItem(BaseModel):
     end_utc: datetime
     status: str
     venue_id: UUID | None = None
+    members: list[str] = []
+    items: list[EventAllocation] = []

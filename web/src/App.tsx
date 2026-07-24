@@ -1,40 +1,67 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getOrg } from "./api/scheduling";
+import { listConflicts } from "./api/resources";
+import { getFinanceSummary } from "./api/finance";
 import { Calendar } from "./pages/Calendar";
 import { Resources } from "./pages/Resources";
 import { Budget } from "./pages/Budget";
 
-// ponytail: state-based tabs, not react-router — 3 views, one URL. Add the router
-// when a view needs a deep-linkable URL (e.g. sharing a single event).
-const TABS = {
-  Calendar: <Calendar />,
-  Resources: <Resources />,
-  Budget: <Budget />,
-} as const;
+const TABS = ["Schedule", "Resources", "Budget"] as const;
+type Tab = (typeof TABS)[number];
 
 export function App() {
-  const [tab, setTab] = useState<keyof typeof TABS>("Calendar");
+  const [tab, setTab] = useState<Tab>("Schedule");
+  const [tz, setTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [org, setOrg] = useState<string>("");
+  const [caught, setCaught] = useState<number | null>(null);
+
+  useEffect(() => {
+    getOrg()
+      .then((o) => {
+        setTz(o.timezone);
+        setOrg(o.name);
+      })
+      .catch(() => {});
+    // The headline: how many claims-over-a-limit SyncUp is holding back right now.
+    Promise.all([listConflicts().catch(() => []), getFinanceSummary().catch(() => null)])
+      .then(([conflicts, fin]) => {
+        const overCap = fin ? fin.events.filter((e) => e.over_cap).length : 0;
+        setCaught(conflicts.length + overCap);
+      })
+      .catch(() => {});
+  }, []);
+
   return (
-    <div style={{ fontFamily: "system-ui, sans-serif", maxWidth: 1100, margin: "0 auto", padding: 24 }}>
-      <h1>SyncUp</h1>
-      <nav style={{ display: "flex", gap: 8, marginBottom: 24 }}>
-        {(Object.keys(TABS) as (keyof typeof TABS)[]).map((name) => (
-          <button
-            key={name}
-            onClick={() => setTab(name)}
-            style={{
-              padding: "6px 14px",
-              border: "1px solid #ccc",
-              borderRadius: 6,
-              background: tab === name ? "#111" : "#fff",
-              color: tab === name ? "#fff" : "#111",
-              cursor: "pointer",
-            }}
-          >
-            {name}
-          </button>
-        ))}
-      </nav>
-      {TABS[tab]}
+    <div className="wrap">
+      <header className="topbar">
+        <div className="topline">
+          <div>
+            <div className="eyebrow">SyncUp · Operations Console</div>
+            <h1 className="thesis">{org || "SyncUp"}</h1>
+            <p className="tagline">
+              One <span className="accent">conflict</span> primitive · three domains
+            </p>
+          </div>
+          <div className="caught">
+            <b>{caught ?? "—"}</b>
+            conflicts held back
+            <br />
+            before anyone committed
+          </div>
+        </div>
+
+        <nav className="nav" role="tablist" aria-label="Modules">
+          {TABS.map((t) => (
+            <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+              {t}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      {tab === "Schedule" && <Calendar tz={tz} />}
+      {tab === "Resources" && <Resources tz={tz} />}
+      {tab === "Budget" && <Budget />}
     </div>
   );
 }

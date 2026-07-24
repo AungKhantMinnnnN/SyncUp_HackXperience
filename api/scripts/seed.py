@@ -274,6 +274,17 @@ async def seed() -> None:
                 )
                 for ev, m, status in rsvps
             )
+            # Attendees for the two upcoming demo events.
+            db.add_all(
+                EventAttendee(event_id=orientation.id, member_id=m.id,
+                              required=(m.role != "member"), rsvp_status="attending")
+                for m in members
+            )
+            db.add_all(
+                EventAttendee(event_id=film.id, member_id=m.id,
+                              required=(m.role != "member"), rsvp_status="attending")
+                for m in members[:5]
+            )
 
             resources = {
                 name: Resource(org_id=org.id, name=name, category=cat, quantity_total=qty, exclusive=excl)
@@ -316,6 +327,11 @@ async def seed() -> None:
                                 quantity=5, org_owned=False, source="ai", est_cost=Decimal("120.00")),
                 PackingListItem(event_id=orientation.id, resource_id=None, item_name="Printed flyers",
                                 quantity=200, org_owned=False, source="ai", est_cost=Decimal("0.20")),
+                # Film Screening's allocation.
+                PackingListItem(event_id=film.id, resource_id=resources["Projector"].id,
+                                item_name="Projector", quantity=1, org_owned=True, source="ai"),
+                PackingListItem(event_id=film.id, resource_id=resources["Wireless mic"].id,
+                                item_name="Wireless mic", quantity=3, org_owned=True, source="ai"),
             ])
 
             treasurer = next(m for m in members if m.role == "treasurer")
