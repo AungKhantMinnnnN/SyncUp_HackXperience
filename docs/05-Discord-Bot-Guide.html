@@ -1,0 +1,180 @@
+<meta charset="utf-8">
+<title>SyncUp — Discord Bot Setup &amp; Commands Guide</title>
+<style>
+  :root { --accent:#C8102E; --dark:#1A1A2E; --gray:#5A5A6E; --line:#E3E3E8; --bg:#FFFFFF; --soft:#FAFAFB; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; color:var(--dark);
+         background:var(--bg); margin:0; padding:48px 40px 100px; line-height:1.65; max-width:1050px; margin-inline:auto; }
+  h1 { font-size:42px; margin:0 0 6px; color:var(--accent); letter-spacing:-.02em; }
+  .sub { font-size:20px; margin:0 0 6px; }
+  .meta { font-size:13px; color:var(--gray); padding-bottom:18px; border-bottom:3px solid var(--accent); margin-bottom:12px; }
+  h2 { font-size:27px; margin:52px 0 10px; color:var(--accent); padding-top:8px; border-top:1px solid var(--line); }
+  h3 { font-size:19px; margin:32px 0 6px; }
+  h4 { margin:22px 0 4px; color:var(--gray); text-transform:uppercase; letter-spacing:.05em; font-size:13px; }
+  p, li { font-size:15px; }
+  code { background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:13px; }
+  pre.code { background:#1A1A2E; color:#E8E8EE; border-radius:8px; padding:16px 18px; overflow-x:auto;
+             font-size:12.5px; line-height:1.55; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre.code .c { color:#8A93A8; }
+  table { border-collapse:collapse; width:100%; margin:14px 0 6px; font-size:14px; }
+  th { background:var(--accent); color:#fff; text-align:left; padding:9px 11px; font-weight:600; }
+  td { border-bottom:1px solid var(--line); padding:9px 11px; vertical-align:top; }
+  tr:nth-child(even) td { background:var(--soft); }
+  .note { border-left:4px solid var(--accent); background:var(--soft); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .warn { border-left:4px solid #B8860B; background:#FFFBEB; padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .tag { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:99px; color:#fff; letter-spacing:.04em; background:#1A6E8E; }
+  nav { background:var(--soft); border:1px solid var(--line); border-radius:12px; padding:18px 24px; margin:28px 0 8px; }
+  nav ol { margin:0; padding-left:20px; columns:2; column-gap:36px; font-size:14px; }
+  nav li { margin:3px 0; break-inside:avoid; }
+  a { color:var(--accent); }
+  .step { counter-increment:step; }
+  .steps { counter-reset:step; list-style:none; padding-left:0; }
+  .steps li { position:relative; padding-left:38px; margin:14px 0; }
+  .steps li::before { content:counter(step); position:absolute; left:0; top:0; width:26px; height:26px;
+    background:var(--accent); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:13px; font-weight:700; }
+</style>
+
+<h1>Discord Bot Setup &amp; Commands Guide</h1>
+<p class="sub">SyncUp — creating the bot application and using/extending its slash commands</p>
+<p class="meta"><span class="tag">MEMBER B</span> &nbsp; Companion to <code>00-Team-Handbook.html</code> §14 &nbsp;·&nbsp; Covers <code>api/app/bot/</code></p>
+
+<nav>
+<ol>
+<li><a href="#s1">What this covers</a></li>
+<li><a href="#s2">Prerequisites</a></li>
+<li><a href="#s3">Create the Discord application</a></li>
+<li><a href="#s4">Configure the bot user</a></li>
+<li><a href="#s5">Generate the invite link</a></li>
+<li><a href="#s6">Environment variables</a></li>
+<li><a href="#s7">Install &amp; run</a></li>
+<li><a href="#s8">Verify it's online</a></li>
+<li><a href="#s9">Command reference</a></li>
+<li><a href="#s10">How commands are wired</a></li>
+<li><a href="#s11">Adding a new command</a></li>
+<li><a href="#s12">Troubleshooting</a></li>
+</ol>
+</nav>
+
+<h2 id="s1">1. What This Covers</h2>
+<p>This is the practical, click-by-click companion to the architecture described in the Team Handbook. It walks through creating the actual Discord application, wiring its credentials into the SyncUp bot skeleton already in <code>api/app/bot/</code>, running it locally, and using or extending the two commands currently registered: <code>/inventory</code> and <code>/packing-list</code>.</p>
+
+<h2 id="s2">2. Prerequisites</h2>
+<table>
+<tr><th>Requirement</th><th>Why</th></tr>
+<tr><td>Python 3.12+</td><td>The codebase uses newer syntax (e.g. PEP 604 unions). The system default on some machines is 3.9 — check with <code>python3 --version</code> and install 3.12 from <a href="https://www.python.org/downloads/">python.org</a> or via Homebrew if it's older</td></tr>
+<tr><td>A Discord account</td><td>To create the application in the Developer Portal</td></tr>
+<tr><td>A test Discord server you own or admin</td><td>You need &quot;Manage Server&quot; permission to add a bot to it</td></tr>
+<tr><td><code>uv</code> or <code>pip</code></td><td>To install <code>api/pyproject.toml</code> dependencies</td></tr>
+</table>
+
+<h2 id="s3">3. Create the Discord Application</h2>
+<ol class="steps">
+<li class="step">Go to the <a href="https://discord.com/developers/applications">Discord Developer Portal</a> and sign in.</li>
+<li class="step">Click <strong>New Application</strong>, top right. Name it <code>SyncUp</code> (or <code>SyncUp-dev</code> if you want a separate dev bot from the demo bot).</li>
+<li class="step">On the <strong>General Information</strong> page, optionally set an app icon and description — this is what shows up in the server member list, worth doing before a demo.</li>
+<li class="step">In the left sidebar, click <strong>Bot</strong>.</li>
+<li class="step">Click <strong>Reset Token</strong> (first time it's called this even though nothing existed before) → confirm → copy the token immediately. Discord shows it exactly once; if you lose it, reset again.</li>
+</ol>
+<div class="warn"><strong>Treat the token like a password.</strong> Anyone with it can control your bot. Never commit it — it goes in <code>.env</code>, which is already in <code>.gitignore</code>. If a token is ever pushed to a public GitHub repo, Discord auto-revokes it and you'll need to reset again.</div>
+
+<h2 id="s4">4. Configure the Bot User</h2>
+<p>Still on the <strong>Bot</strong> page:</p>
+<ul>
+<li>Under <strong>Privileged Gateway Intents</strong>, enable <strong>Message Content Intent</strong>. This lets the bot read message text, needed if you later want <code>@SyncUp</code> mention-based requests in addition to slash commands. Slash commands alone don't strictly need it, but the client is already configured to request it (<code>app/bot/client.py</code> sets <code>intents.message_content = True</code>), so the gateway connection will fail without it.</li>
+<li>Leave <strong>Public Bot</strong> on unless you specifically want only you to be able to invite it.</li>
+</ul>
+
+<h2 id="s5">5. Generate the Invite Link</h2>
+<ol class="steps">
+<li class="step">Left sidebar → <strong>OAuth2</strong> → <strong>URL Generator</strong>.</li>
+<li class="step">Under <strong>Scopes</strong>, check <code>bot</code> and <code>applications.commands</code>. The second is required — without it, slash commands never appear in the server even if the bot is online.</li>
+<li class="step">Under <strong>Bot Permissions</strong>, check: <strong>Send Messages</strong>, <strong>Embed Links</strong>, <strong>Use Slash Commands</strong>, <strong>Read Message History</strong>.</li>
+<li class="step">Copy the generated URL at the bottom, paste it into a browser, pick your test server, and authorize.</li>
+</ol>
+<p>You should now see the bot listed in your server's member sidebar, showing offline (it isn't running yet).</p>
+
+<h2 id="s6">6. Environment Variables</h2>
+<p>You need your server's ID for guild-scoped command sync (see §12 for why this matters). In Discord: <strong>User Settings → Advanced → Developer Mode</strong> (toggle on), then right-click your server icon → <strong>Copy Server ID</strong>.</p>
+<pre class="code">cd syncup/api
+cp .env.example .env</pre>
+<p>Fill in <code>.env</code>:</p>
+<pre class="code"># --- Discord ---
+DISCORD_BOT_TOKEN=&lt;paste the token from step 3&gt;
+DISCORD_GUILD_ID=&lt;paste your server ID&gt;
+DISCORD_ANNOUNCE_CHANNEL_ID=            <span class="c"># optional for now — used later for #events announcements</span>
+
+# --- App ---
+ENVIRONMENT=development</pre>
+
+<h2 id="s7">7. Install &amp; Run</h2>
+<pre class="code">cd syncup/api
+uv venv &amp;&amp; source .venv/bin/activate      <span class="c"># Windows: .venv\Scripts\activate</span>
+uv pip install -e ".[dev]"
+
+uvicorn app.main:app --reload --port 8000</pre>
+<p>The bot runs as a background task inside the FastAPI process (see <code>app/main.py</code>'s <code>lifespan</code>), so starting the API also starts the bot — there's nothing separate to launch.</p>
+
+<h2 id="s8">8. Verify It's Online</h2>
+<ul>
+<li>Terminal should log <code>SyncUp online as SyncUp#XXXX</code>.</li>
+<li><code>http://localhost:8000/health</code> should return <code>{"status": "ok"}</code>.</li>
+<li>In your Discord server, the bot should now show <strong>online</strong> in the member list.</li>
+<li>Type <code>/</code> in any channel the bot can see — <code>/inventory</code> and <code>/packing-list</code> should appear in the autocomplete list within a few seconds (guild sync is near-instant; see §12 if they don't show up).</li>
+</ul>
+
+<h2 id="s9">9. Command Reference</h2>
+<table>
+<tr><th>Command</th><th>Arguments</th><th>What it does</th><th>Status</th></tr>
+<tr><td><code>/inventory</code></td><td>none</td><td>Lists the org's tracked equipment: name, total quantity, exclusive vs. pooled, category</td><td>Stub — reads a hardcoded mock catalogue in <code>commands/resources.py</code></td></tr>
+<tr><td><code>/packing-list</code></td><td><code>description</code> (string, required) — e.g. <code>"100-person orientation night"</code></td><td>Returns an itemised packing list embed for the described event, with one flagged conflict (mocked as the projector being booked by Chess Club)</td><td>Stub — returns fixed mock data regardless of the description text</td></tr>
+</table>
+<div class="note">Both commands are intentionally stubbed with mock data right now. They exist so the <strong>command surface and embed shape</strong> are locked in early — Member A and C can build against a stable bot interface while <code>features/resources/service.py</code>, <code>availability.py</code>, and <code>agent.py</code> are still being built. Swap the mock blocks for real calls to <code>resources.service.plan_for_event()</code> once that module lands (see the inline <code>TODO</code> in <code>commands/resources.py</code>).</div>
+
+<h2 id="s10">10. How Commands Are Wired</h2>
+<p>Three pieces, so it's clear where to hook in:</p>
+<table>
+<tr><th>File</th><th>Role</th></tr>
+<tr><td><code>app/bot/client.py</code></td><td>Creates the single shared <code>discord.Client</code> and <code>app_commands.CommandTree</code>. Calls each feature's <code>register(tree)</code> function. Handles guild-scoped sync in <code>on_ready</code>.</td></tr>
+<tr><td><code>app/bot/commands/resources.py</code></td><td>Defines a <code>register(tree)</code> function that adds <code>/inventory</code> and <code>/packing-list</code> to the shared tree using <code>@tree.command(...)</code> decorators.</td></tr>
+<tr><td><code>app/bot/embeds.py</code></td><td>Shared embed builders (<code>info_embed</code>, <code>success_embed</code>, <code>warning_embed</code>, <code>error_embed</code>, <code>conflict_field</code>, <code>packing_list_embed</code>) so every feature's replies look like one product instead of three different bots.</td></tr>
+</table>
+<p>The pattern for another feature module (e.g. Member A's scheduling commands) is identical: a <code>commands/scheduling.py</code> with its own <code>register(tree)</code>, imported and called once from <code>client.py</code>.</p>
+
+<h2 id="s11">11. Adding a New Command</h2>
+<p>Example: adding a <code>/reserve</code> command to <code>commands/resources.py</code>.</p>
+<pre class="code"><span class="c"># inside register(tree) in app/bot/commands/resources.py</span>
+
+@tree.command(name="reserve", description="Hold a resource for an event window")
+@app_commands.describe(
+    item="Resource name, e.g. 'Projector'",
+    hours="How many hours to hold it for",
+)
+async def reserve(interaction: discord.Interaction, item: str, hours: int) -&gt; None:
+    await interaction.response.defer(thinking=True)
+
+    <span class="c"># TODO: call resources.service.hold(...) once it exists</span>
+    embed = embeds.success_embed(
+        f"Reserved: {item}",
+        f"Held for {hours}h. (stub — not yet backed by real availability check)",
+    )
+    await interaction.followup.send(embed=embed)</pre>
+<ul>
+<li><strong>Always <code>defer(thinking=True)</code> before any work that isn't instant</strong> — Discord kills an un-acknowledged interaction after 3 seconds, and an LLM or DB round trip is slower than that. Reply with <code>interaction.followup.send(...)</code> afterward, not <code>interaction.response.send_message(...)</code>.</li>
+<li>Restart <code>uvicorn</code> after adding a command — the tree is built at import time.</li>
+<li>New commands appear in Discord within seconds because sync is guild-scoped, not global.</li>
+</ul>
+
+<h2 id="s12">12. Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Slash commands never appear</td><td>Missing <code>applications.commands</code> scope when generating the invite URL, or synced globally instead of to the guild</td><td>Re-invite with the correct scope; confirm <code>client.py</code> is syncing via <code>tree.sync(guild=...)</code>, not a bare <code>tree.sync()</code></td></tr>
+<tr><td>Bot shows offline</td><td>Invalid or unset <code>DISCORD_BOT_TOKEN</code>, or the process crashed on startup</td><td>Check the terminal output for the exception; re-copy the token from the Bot page (reset it if unsure)</td></tr>
+<tr><td><code>PrivilegedIntentsRequired</code> error on startup</td><td>Message Content Intent not enabled in the Developer Portal, but requested in code</td><td>Bot page → Privileged Gateway Intents → enable Message Content Intent</td></tr>
+<tr><td>&quot;The application did not respond&quot; in Discord</td><td>A command handler took longer than 3 seconds before responding</td><td>Add <code>await interaction.response.defer(thinking=True)</code> as the first line, then <code>followup.send(...)</code></td></tr>
+<tr><td>Command shows in Discord but running it does nothing / errors silently</td><td>Exception raised inside the handler after <code>defer()</code></td><td>Check the <code>uvicorn</code> terminal log — discord.py logs the traceback there, not in Discord</td></tr>
+<tr><td>Changed a command but Discord still shows the old version</td><td>Discord caches command definitions client-side briefly</td><td>Restart your Discord client, or wait ~1 minute; guild sync itself is near-instant server-side</td></tr>
+<tr><td><code>401 Unauthorized</code> on startup</td><td>Token was reset in the portal after <code>.env</code> was last filled in</td><td>Copy the current token again — old tokens are invalidated on reset</td></tr>
+</table>
+
+<div class="note">For the demo itself, the Team Handbook's §19 Demo Runbook and §16 deployment warning about Render's 15-minute free-tier spin-down still apply once this is deployed — this guide only covers local setup and the command layer.</div>
