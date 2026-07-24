@@ -1,5 +1,6 @@
 """FastAPI app: lifespan (bot + jobs), CORS, router mounts, one error shape."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -7,14 +8,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from app.bot.client import start_bot, stop_bot
 from app.config import settings
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ponytail: bot + APScheduler start here once implemented — kept out until they exist.
-    # from app.bot.client import start_bot; from app.jobs.scheduler import start_jobs
+    # APScheduler (hold-expiry, reminders) starts here once app/jobs/scheduler.py lands.
+    # from app.jobs.scheduler import start_jobs; start_jobs()
+    bot_task = await start_bot()
     yield
+    await stop_bot(bot_task)
 
 
 app = FastAPI(title="SyncUp", lifespan=lifespan)
