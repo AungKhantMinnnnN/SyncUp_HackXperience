@@ -32,6 +32,7 @@ Use the **Shared Pooler (Supavisor)** connection string, not the direct one
 ```bash
 cd api
 cp .env.example .env          # fill in DATABASE_URL (required to start), then the rest
+az login                      # Foundry auth is Entra ID, not an API key (skip if not using the LLM)
 
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
@@ -72,7 +73,7 @@ Backend (`api/.env`) — see `api/.env.example`:
 | Var | Required | Notes |
 |---|---|---|
 | `DATABASE_URL` | yes | Supabase Shared Pooler URL; rewritten for asyncpg at load |
-| `FOUNDRY_BASE_URL` / `FOUNDRY_API_KEY` / `FOUNDRY_MODEL` | for LLM features | Microsoft Foundry via the OpenAI SDK |
+| `FOUNDRY_PROJECT_ENDPOINT` / `FOUNDRY_AGENT_NAME` / `FOUNDRY_AGENT_VERSION` | for LLM features | Foundry project endpoint + hosted agent reference. Auth is Entra ID (`az login`), **not** an API key — see below |
 | `DISCORD_BOT_TOKEN` / `DISCORD_TEST_GUILD_ID` | for the bot | |
 | `API_KEY` | for dashboard auth | sent as the `X-API-Key` header |
 | `CORS_ORIGINS` | no | defaults to `http://localhost:5173` |

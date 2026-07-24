@@ -10,9 +10,12 @@ class Settings(BaseSettings):
     api_key: str = ""
     cors_origins: str = "http://localhost:5173"
 
-    foundry_base_url: str = ""
-    foundry_api_key: str = ""
-    foundry_model: str = ""
+    # Foundry via Azure AI Projects SDK: Entra ID auth (az login / AZURE_* env), no
+    # API key. Endpoint is the project endpoint; calls reference the hosted agent by
+    # name + version (the agent config owns the model).
+    foundry_project_endpoint: str = ""
+    foundry_agent_name: str = "SyncUp-Agent"
+    foundry_agent_version: str = "1"
 
     discord_bot_token: str = ""
     discord_test_guild_id: str = ""

@@ -13,6 +13,8 @@ dependencies = [
     "pydantic-settings",
     "discord.py",
     "openai",
+    "azure-ai-projects>=2.1.0",
+    "azure-identity",
     "apscheduler",
     "httpx",
 ]
