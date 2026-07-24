@@ -13,8 +13,10 @@ from functools import lru_cache
 
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.models.org import AiInteraction
 
 
 @lru_cache
@@ -48,5 +50,26 @@ def agent_response(input, **kwargs):
     )
 
 
-# ponytail: JSON-schema validation + ai_interactions insert wrap agent_response() when
-# the first agent.py needs them — shaped by the real caller, not guessed now.
+def log_interaction(
+    db: AsyncSession,
+    *,
+    feature: str,
+    prompt: str,
+    resp,
+    latency_ms: int | None = None,
+    org_id=None,
+) -> None:
+    """Record one LLM call to ai_interactions — "how do you know the AI is right?"
+    (CLAUDE.md). Adds to the caller's session; the caller commits."""
+    usage = getattr(resp, "usage", None)
+    db.add(
+        AiInteraction(
+            org_id=org_id,
+            feature=feature,
+            model=f"{settings.foundry_agent_name}:{settings.foundry_agent_version}",
+            prompt=prompt,
+            response={"output_text": getattr(resp, "output_text", None)},
+            tokens=getattr(usage, "total_tokens", None) if usage is not None else None,
+            latency_ms=latency_ms,
+        )
+    )

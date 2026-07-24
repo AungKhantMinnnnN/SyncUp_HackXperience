@@ -1,9 +1,11 @@
 import asyncio
+import contextlib
 import logging
 
 import discord
 from discord import app_commands
 
+from app.bot.commands import plan as plan_commands
 from app.bot.commands import resources as resources_commands
 from app.config import settings
 
@@ -15,6 +17,7 @@ intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
+plan_commands.register(tree)
 resources_commands.register(tree)
 
 
@@ -36,3 +39,5 @@ async def start_bot() -> asyncio.Task:
 async def stop_bot(task: asyncio.Task) -> None:
     await bot.close()
     task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task  # wait for the gateway session to fully close before returning
