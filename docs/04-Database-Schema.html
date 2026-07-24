@@ -1,0 +1,369 @@
+<meta charset="utf-8">
+<title>SyncUp — Database Schema (Monolith)</title>
+<style>
+  :root { --accent:#C8102E; --dark:#1A1A2E; --gray:#5A5A6E; --line:#E3E3E8; --bg:#FFFFFF; --soft:#FAFAFB; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; color:var(--dark);
+         background:var(--bg); margin:0; padding:48px 40px 90px; line-height:1.65; max-width:1150px; margin-inline:auto; }
+  h1 { font-size:38px; margin:0 0 6px; color:var(--accent); letter-spacing:-.02em; }
+  .sub { font-size:19px; color:var(--dark); margin:0 0 6px; }
+  .meta { font-size:13px; color:var(--gray); padding-bottom:18px; border-bottom:3px solid var(--accent); margin-bottom:36px; }
+  h2 { font-size:24px; margin:46px 0 8px; color:var(--accent); }
+  h3 { font-size:17px; margin:28px 0 6px; color:var(--dark); }
+  p, li { font-size:15px; }
+  code { background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:13px; }
+  pre.code { background:#1A1A2E; color:#E8E8EE; border-radius:8px; padding:16px 18px; overflow-x:auto;
+             font-size:12.5px; line-height:1.55; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre.code .c { color:#8A93A8; }
+  table { border-collapse:collapse; width:100%; margin:14px 0 6px; font-size:14px; }
+  th { background:var(--accent); color:#fff; text-align:left; padding:9px 11px; font-weight:600; }
+  td { border-bottom:1px solid var(--line); padding:9px 11px; vertical-align:top; }
+  tr:nth-child(even) td { background:var(--soft); }
+  .diagram { border:1px solid var(--line); border-radius:12px; padding:20px; margin:18px 0; background:#fff; overflow-x:auto; }
+  .note { border-left:4px solid var(--accent); background:var(--soft); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .warn { border-left:4px solid #B8860B; background:#FFFBEB; padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .tag { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:99px; color:#fff; letter-spacing:.04em; }
+  .a { background:#C8102E; } .b { background:#1A6E8E; } .c { background:#2E7D4F; } .s { background:#5A5A6E; }
+</style>
+
+<h1>Database Schema</h1>
+<p class="sub">SyncUp — one PostgreSQL database for one monolith application</p>
+<p class="meta">Supabase Postgres 16 · SQLAlchemy 2.0 async · single Alembic chain &nbsp;·&nbsp; <span class="tag s">SHARED</span> <span class="tag a">SCHEDULING · A</span> <span class="tag b">RESOURCES · B</span> <span class="tag c">FINANCE · C</span></p>
+
+<div class="note"><strong>Monolith consequences for the database.</strong> One application process means: <strong>one database</strong>, <strong>one <code>public</code> schema</strong>, <strong>one SQLAlchemy <code>MetaData</code></strong>, <strong>one linear Alembic migration chain</strong>, and <strong>one connection pool</strong>. Foreign keys cross module boundaries freely, and a single transaction can span all three modules' tables — which is exactly what the confirm flow relies on. None of this would be available if each feature were its own service.</div>
+
+<h2>1. Ownership Map</h2>
+<p>Every table has exactly one <em>writer module</em>; the others read. This is a code-review convention, not a database permission — but it is the single rule that lets three people share one schema for 24 hours without collisions.</p>
+<table>
+<tr><th>Owner</th><th>Model file</th><th>Writes</th></tr>
+<tr><td><span class="tag s">SHARED</span></td><td><code>app/models/org.py</code></td><td><code>organizations</code>, <code>members</code>, <code>venues</code>, <code>ai_interactions</code></td></tr>
+<tr><td><span class="tag a">MEMBER A</span></td><td><code>app/models/scheduling.py</code></td><td><code>busy_blocks</code>, <code>scheduling_requests</code>, <code>slot_proposals</code>, <code>events</code>, <code>event_attendees</code></td></tr>
+<tr><td><span class="tag b">MEMBER B</span></td><td><code>app/models/resources.py</code></td><td><code>resources</code>, <code>resource_reservations</code>, <code>packing_list_items</code></td></tr>
+<tr><td><span class="tag c">MEMBER C</span></td><td><code>app/models/finance.py</code></td><td><code>budgets</code>, <code>event_budgets</code>, <code>budget_line_items</code>, <code>expenses</code></td></tr>
+</table>
+
+<h3>One Alembic chain, three files</h3>
+<p>Because there is one database, there is one linear revision history. Migrations are strictly sequential — <strong>B cannot generate their migration until A's is merged</strong>, and C cannot until B's is.</p>
+<pre class="code">alembic/versions/
+├── 0001_core.py        <span class="c"># A — hour 0-2. down_revision = None</span>
+├── 0002_resources.py   <span class="c"># B — branches from 0001</span>
+└── 0003_finance.py     <span class="c"># C — branches from 0002</span></pre>
+<div class="warn"><strong>The most likely database failure in your 24 hours:</strong> two members run <code>alembic revision --autogenerate</code> from the same parent, producing two heads. Alembic then refuses to upgrade with "Multiple head revisions are present". Avoid it by sequencing: A merges, then B generates; B merges, then C generates. If it happens anyway, edit one file's <code>down_revision</code> to point at the other rather than reaching for <code>alembic merge</code> under time pressure.</div>
+<p>All three model files must be imported in <code>app/models/__init__.py</code> before <code>Base.metadata</code> is read, or autogenerate will silently propose dropping the tables it cannot see.</p>
+
+<h2>2. Entity Relationship Diagram</h2>
+<div class="diagram">
+<pre class="mermaid">
+erDiagram
+  ORGANIZATIONS ||--o{ MEMBERS : has
+  ORGANIZATIONS ||--o{ EVENTS : hosts
+  ORGANIZATIONS ||--o{ RESOURCES : owns
+  ORGANIZATIONS ||--o{ BUDGETS : allocates
+  ORGANIZATIONS ||--o{ SCHEDULING_REQUESTS : receives
+  ORGANIZATIONS ||--o{ VENUES : registers
+
+  MEMBERS ||--o{ BUSY_BLOCKS : "is busy during"
+  MEMBERS ||--o{ EVENT_ATTENDEES : attends
+  MEMBERS ||--o{ SCHEDULING_REQUESTS : creates
+  MEMBERS ||--o{ EXPENSES : "pays for"
+
+  SCHEDULING_REQUESTS ||--o{ SLOT_PROPOSALS : generates
+  SLOT_PROPOSALS ||--o| EVENTS : "confirmed into"
+
+  EVENTS ||--o{ EVENT_ATTENDEES : includes
+  EVENTS ||--o{ PACKING_LIST_ITEMS : requires
+  EVENTS ||--o{ RESOURCE_RESERVATIONS : reserves
+  EVENTS ||--o| EVENT_BUDGETS : "costed by"
+  VENUES ||--o{ EVENTS : hosts
+
+  RESOURCES ||--o{ RESOURCE_RESERVATIONS : "reserved as"
+  RESOURCES ||--o{ PACKING_LIST_ITEMS : "matched to"
+
+  BUDGETS ||--o{ EVENT_BUDGETS : funds
+  EVENT_BUDGETS ||--o{ BUDGET_LINE_ITEMS : "itemised by"
+  EVENT_BUDGETS ||--o{ EXPENSES : "actuals against"
+  BUDGET_LINE_ITEMS ||--o{ EXPENSES : "matched to"
+
+  ORGANIZATIONS {
+    uuid id PK
+    text name
+    text discord_guild_id UK
+    text timezone
+    time quiet_hours_start
+    time quiet_hours_end
+  }
+  MEMBERS {
+    uuid id PK
+    uuid org_id FK
+    text full_name
+    text email
+    text discord_user_id
+    text role
+    int priority_weight
+  }
+  VENUES {
+    uuid id PK
+    uuid org_id FK
+    text name
+    int capacity
+    numeric hourly_cost
+    text external_room_id
+  }
+  BUSY_BLOCKS {
+    uuid id PK
+    uuid member_id FK
+    text kind
+    timestamptz start_utc
+    timestamptz end_utc
+    int weight
+    text source
+  }
+  SCHEDULING_REQUESTS {
+    uuid id PK
+    uuid org_id FK
+    uuid created_by FK
+    text raw_prompt
+    jsonb parsed_constraints
+    text status
+  }
+  SLOT_PROPOSALS {
+    uuid id PK
+    uuid request_id FK
+    uuid event_id FK
+    timestamptz start_utc
+    timestamptz end_utc
+    numeric score
+    numeric attendance_pct
+    jsonb conflicts
+    int rank
+    bool selected
+  }
+  EVENTS {
+    uuid id PK
+    uuid org_id FK
+    uuid venue_id FK
+    uuid created_by FK
+    text title
+    text description
+    timestamptz start_utc
+    timestamptz end_utc
+    int expected_attendance
+    text status
+  }
+  EVENT_ATTENDEES {
+    uuid event_id PK
+    uuid member_id PK
+    bool required
+    text rsvp_status
+  }
+  RESOURCES {
+    uuid id PK
+    uuid org_id FK
+    text name
+    text category
+    int quantity_total
+    bool exclusive
+    numeric replacement_cost
+    text condition
+  }
+  RESOURCE_RESERVATIONS {
+    uuid id PK
+    uuid resource_id FK
+    uuid event_id FK
+    int quantity
+    timestamptz start_utc
+    timestamptz end_utc
+    bool exclusive
+    text status
+    timestamptz expires_at
+  }
+  PACKING_LIST_ITEMS {
+    uuid id PK
+    uuid event_id FK
+    uuid resource_id FK
+    text item_name
+    int quantity
+    bool org_owned
+    text source
+    numeric est_cost
+  }
+  BUDGETS {
+    uuid id PK
+    uuid org_id FK
+    text semester
+    numeric total_allocated
+    char currency
+  }
+  EVENT_BUDGETS {
+    uuid id PK
+    uuid event_id FK
+    uuid budget_id FK
+    numeric estimated_total
+    numeric actual_total
+    numeric stated_cap
+    text status
+  }
+  BUDGET_LINE_ITEMS {
+    uuid id PK
+    uuid event_budget_id FK
+    text category
+    text description
+    numeric unit_cost
+    int quantity
+    numeric line_total
+    text source
+  }
+  EXPENSES {
+    uuid id PK
+    uuid event_budget_id FK
+    uuid line_item_id FK
+    uuid paid_by FK
+    numeric amount
+    text description
+    text status
+    timestamptz spent_at
+  }
+</pre>
+</div>
+
+<h2>3. Write Paths Inside One Transaction</h2>
+<p>The confirm flow writes to all three modules' tables in a single transaction opened by scheduling. This diagram shows what the database sees.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  BEGIN(["BEGIN — opened by scheduling/service.py"]) --> E1["INSERT events"]
+  E1 --> E2["INSERT event_attendees"]
+  E2 --> E3["UPDATE slot_proposals SET selected"]
+  E3 --> R1["resources.plan_for_event: same session"]
+  R1 --> R2["INSERT packing_list_items"]
+  R2 --> R3["INSERT resource_reservations status=held"]
+  R3 --> F1["finance.draft_for_event: same session"]
+  F1 --> F2["INSERT event_budgets status=draft"]
+  F2 --> F3["INSERT budget_line_items"]
+  F3 --> COMMIT(["COMMIT — all or nothing"])
+  R3 -.->|"exclusion constraint violation"| RB(["ROLLBACK<br/>event never existed"])
+  F2 -.->|"any exception"| RB
+</pre>
+</div>
+<div class="note"><strong>This is the schema-level argument for the monolith.</strong> If a resource conflict is detected by the exclusion constraint at step R3, the event insert at step E1 rolls back with it. There is no compensating transaction, no orphaned event, no cleanup job. Across three services this would be a distributed-saga problem; in one process it is <code>async with db.begin():</code>.</div>
+
+<h2>4. Session &amp; Pool Configuration</h2>
+<p>One process, one pool, one session per request — plus one long-lived session pattern for the Discord bot.</p>
+<pre class="code"><span class="c"># app/db.py</span>
+engine = create_async_engine(
+    settings.database_url,        <span class="c"># Supabase SESSION POOLER host, +asyncpg</span>
+    pool_size=5,                  <span class="c"># Render free = 1 instance; keep small</span>
+    max_overflow=5,
+    pool_pre_ping=True,           <span class="c"># survives Supabase/Render idle disconnects</span>
+    pool_recycle=1800,
+)
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+<span class="c"># FastAPI request scope</span>
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
+<span class="c"># Discord command scope — bot handlers are NOT in a request,</span>
+<span class="c"># so they open their own session explicitly.</span>
+async def with_session(fn, *args, **kwargs):
+    async with SessionLocal() as session:
+        return await fn(session, *args, **kwargs)</pre>
+<div class="warn"><strong>Two Supabase gotchas that will cost you an hour each.</strong><br>
+<strong>1.</strong> Use the <strong>Shared Pooler (Supavisor)</strong> connection string, not the direct one. On the free plan the direct host is IPv6-only and Render has no IPv6 egress — you will get an opaque connection timeout that looks like a firewall issue.<br>
+<strong>2.</strong> Supabase gives you <code>postgresql://</code>; SQLAlchemy async needs <code>postgresql+asyncpg://</code>, and asyncpg rejects the <code>?sslmode=</code> parameter that libpq accepts. Rewrite the prefix and strip that query param in <code>config.py</code> so nobody has to remember.</div>
+
+<h2>5. Key Design Decisions</h2>
+<table>
+<tr><th>Decision</th><th>Rationale</th></tr>
+<tr><td>Single <code>public</code> schema, no per-module schemas</td><td>One app, one owner. Per-module schemas add qualified names and Alembic friction for zero benefit in a monolith</td></tr>
+<tr><td>UUID PKs (<code>gen_random_uuid()</code>)</td><td>Three developers seeding independently; no sequence collisions when merging fixtures</td></tr>
+<tr><td>Real foreign keys across module boundaries</td><td>Available precisely because it is one database — referential integrity for free, no orphan-cleanup jobs</td></tr>
+<tr><td>All timestamps <code>TIMESTAMPTZ</code>, stored UTC</td><td>Timezone bugs are the classic scheduling demo killer. Convert to org-local only in the UI</td></tr>
+<tr><td>Money as <code>NUMERIC(12,2)</code></td><td>Float arithmetic on currency produces totals that visibly do not add up</td></tr>
+<tr><td><code>JSONB</code> for <code>parsed_constraints</code> and <code>conflicts</code></td><td>LLM output shape changes hourly during a hackathon; JSONB avoids re-migrating</td></tr>
+<tr><td><code>btree_gist</code> exclusion constraint</td><td>Double-booking becomes impossible at the data layer regardless of application logic</td></tr>
+<tr><td>GiST indexes on <code>tstzrange</code></td><td>Overlap queries are the hottest path in both scheduling and resources</td></tr>
+<tr><td><code>TEXT</code> + <code>CHECK</code> instead of PG <code>ENUM</code></td><td>Adding an enum value mid-hackathon needs a migration and can block; a CHECK is a one-line change</td></tr>
+<tr><td>Soft <code>status</code> columns, no hard deletes</td><td>Cancelled events and released holds stay visible for audit and variance views</td></tr>
+<tr><td><code>ai_interactions</code> log table</td><td>Judges reliably ask "how do you know the AI is right?" — logged prompts, tool calls, and latency answer it</td></tr>
+</table>
+
+<h2>6. Indexes That Matter</h2>
+<pre class="code"><span class="c">-- Overlap queries: scheduling availability + resource conflicts</span>
+CREATE INDEX idx_busy_blocks_range ON busy_blocks
+  USING gist (member_id, tstzrange(start_utc, end_utc));
+
+CREATE INDEX idx_reservations_range ON resource_reservations
+  USING gist (resource_id, tstzrange(start_utc, end_utc));
+
+CREATE INDEX idx_events_org_time ON events (org_id, start_utc)
+  WHERE status IN ('draft', 'confirmed');
+
+<span class="c">-- Hot lookups</span>
+CREATE INDEX idx_members_org       ON members (org_id);
+CREATE INDEX idx_members_discord   ON members (discord_user_id);
+CREATE INDEX idx_line_items_budget ON budget_line_items (event_budget_id);
+CREATE INDEX idx_expenses_budget   ON expenses (event_budget_id);
+
+<span class="c">-- Historical price priors for the budget builder</span>
+CREATE INDEX idx_line_items_category ON budget_line_items (category, created_at DESC);
+
+<span class="c">-- Expiring-hold sweep, runs every 5 minutes</span>
+CREATE INDEX idx_reservations_expiry ON resource_reservations (expires_at)
+  WHERE status = 'held';</pre>
+
+<h2>7. Enumerated Values</h2>
+<table>
+<tr><th>Column</th><th>Allowed values</th></tr>
+<tr><td><code>members.role</code></td><td><code>president</code> (weight 3), <code>exec</code> (2), <code>treasurer</code> (2), <code>member</code> (1)</td></tr>
+<tr><td><code>busy_blocks.kind</code></td><td><code>class</code>, <code>exam</code>, <code>work</code>, <code>club</code>, <code>personal</code></td></tr>
+<tr><td><code>scheduling_requests.status</code></td><td><code>parsing</code>, <code>proposing</code>, <code>awaiting_choice</code>, <code>confirmed</code>, <code>expired</code>, <code>failed</code></td></tr>
+<tr><td><code>events.status</code></td><td><code>draft</code>, <code>confirmed</code>, <code>rescheduled</code>, <code>completed</code>, <code>cancelled</code></td></tr>
+<tr><td><code>resource_reservations.status</code></td><td><code>held</code>, <code>confirmed</code>, <code>checked_out</code>, <code>returned</code>, <code>overdue</code>, <code>released</code></td></tr>
+<tr><td><code>packing_list_items.source</code></td><td><code>ai</code>, <code>manual</code></td></tr>
+<tr><td><code>event_budgets.status</code></td><td><code>draft</code>, <code>approved</code>, <code>rejected</code>, <code>reconciling</code>, <code>closed</code>, <code>cancelled</code></td></tr>
+<tr><td><code>budget_line_items.category</code></td><td><code>food</code>, <code>venue</code>, <code>equipment_rental</code>, <code>printing</code>, <code>materials</code>, <code>transport</code>, <code>contingency</code></td></tr>
+<tr><td><code>expenses.status</code></td><td><code>pending</code>, <code>approved</code>, <code>disputed</code>, <code>rejected</code>, <code>reimbursed</code></td></tr>
+</table>
+
+<h2>8. Seed Data Targets</h2>
+<p>One seed script, <code>api/scripts/seed.py</code>, run against the <strong>dev</strong> Supabase project. It must be idempotent — truncate then insert — so anyone can reset to a known demo state in seconds.</p>
+<table>
+<tr><th>Table</th><th>Rows</th><th>Notes</th></tr>
+<tr><td><code>organizations</code></td><td>2</td><td>Your demo org + a rival club to create the resource conflict</td></tr>
+<tr><td><code>members</code></td><td>12</td><td>Mixed roles so weighting visibly matters</td></tr>
+<tr><td><code>busy_blocks</code></td><td>~150</td><td>3 weeks of classes, 2 exams, part-time shifts</td></tr>
+<tr><td><code>venues</code></td><td>4</td><td>One at capacity 50 so the 100-person event forces a choice</td></tr>
+<tr><td><code>resources</code></td><td>15</td><td>1 projector (exclusive), 4 mics, 120 chairs, banners</td></tr>
+<tr><td><code>resource_reservations</code></td><td>3</td><td>Includes the pre-seeded Chess Club projector clash</td></tr>
+<tr><td><code>budgets</code></td><td>1</td><td>Semester allocation, e.g. $2,000</td></tr>
+<tr><td><code>event_budgets</code> + <code>expenses</code></td><td>4 past events</td><td>Gives the burn-down real history and the price resolver real priors</td></tr>
+</table>
+
+<h2>9. Applying the Schema</h2>
+<pre class="code"><span class="c"># Local, against the dev Supabase project</span>
+cd api
+alembic upgrade head
+python scripts/seed.py
+
+<span class="c"># Production — runs automatically in the Render build command</span>
+pip install -e . &amp;&amp; alembic upgrade head
+
+<span class="c"># Or apply the raw DDL directly, e.g. in the Supabase SQL editor</span>
+psql "$DATABASE_URL" -f schema.sql</pre>
+<p>The complete <code>schema.sql</code> ships alongside this document. Extensions first — <code>pgcrypto</code> and <code>btree_gist</code> must be enabled in the Supabase SQL editor before the first migration runs.</p>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad:true, theme:'base', securityLevel:'loose',
+  themeVariables:{
+    primaryColor:'#FDECEE', primaryTextColor:'#1A1A2E', primaryBorderColor:'#C8102E',
+    lineColor:'#8A8A9A', secondaryColor:'#F5F5F7', tertiaryColor:'#FAFAFB',
+    fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Inter,sans-serif', fontSize:'13px'
+  },
+  er:{ layoutDirection:'TB', entityPadding:14, minEntityWidth:130 },
+  flowchart:{ curve:'basis', padding:14 }
+});
+</script>

@@ -1,0 +1,322 @@
+<meta charset="utf-8">
+<title>SyncUp — Scheduling Module Flow</title>
+<style>
+  :root { --accent:#C8102E; --dark:#1A1A2E; --gray:#5A5A6E; --line:#E3E3E8; --bg:#FFFFFF; --soft:#FAFAFB; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; color:var(--dark);
+         background:var(--bg); margin:0; padding:48px 40px 90px; line-height:1.65; max-width:1100px; margin-inline:auto; }
+  h1 { font-size:38px; margin:0 0 6px; color:var(--accent); letter-spacing:-.02em; }
+  .sub { font-size:19px; color:var(--dark); margin:0 0 6px; }
+  .meta { font-size:13px; color:var(--gray); padding-bottom:18px; border-bottom:3px solid var(--accent); margin-bottom:36px; }
+  h2 { font-size:24px; margin:46px 0 8px; color:var(--accent); }
+  h3 { font-size:17px; margin:28px 0 6px; color:var(--dark); }
+  p, li { font-size:15px; }
+  code { background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:13px; }
+  pre.code { background:#1A1A2E; color:#E8E8EE; border-radius:8px; padding:16px 18px; overflow-x:auto;
+             font-size:12.5px; line-height:1.55; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre.code .c { color:#8A93A8; }
+  table { border-collapse:collapse; width:100%; margin:14px 0 6px; font-size:14px; }
+  th { background:var(--accent); color:#fff; text-align:left; padding:9px 11px; font-weight:600; }
+  td { border-bottom:1px solid var(--line); padding:9px 11px; vertical-align:top; }
+  tr:nth-child(even) td { background:var(--soft); }
+  .diagram { border:1px solid var(--line); border-radius:12px; padding:20px; margin:18px 0; background:#fff; overflow-x:auto; }
+  .note { border-left:4px solid var(--accent); background:var(--soft); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .warn { border-left:4px solid #B8860B; background:#FFFBEB; padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .owner { display:inline-block; background:var(--accent); color:#fff; font-size:12px; font-weight:600;
+           padding:4px 12px; border-radius:99px; letter-spacing:.03em; }
+</style>
+
+<h1>Scheduling Module</h1>
+<p class="sub">SyncUp — AI Operations Manager for Student Organizations</p>
+<p class="meta"><span class="owner">MEMBER A</span> &nbsp; Module 1 of 3 &nbsp;·&nbsp; <code>api/app/features/scheduling/</code> &nbsp;·&nbsp; Monolith: FastAPI · React · Supabase Postgres · Microsoft Foundry</p>
+
+<div class="note"><strong>Architecture note.</strong> SyncUp is a <strong>single FastAPI process</strong>. "Scheduling", "resources", and "finance" are Python packages inside one application, not separate services. Every arrow in the diagrams below that crosses a module boundary is an <strong>in-process function call</strong> sharing one <code>AsyncSession</code> — no HTTP, no queue, no network hop.</div>
+
+<h2>1. Module Scope</h2>
+<p>The scheduling module turns a plain-English request in Discord into a ranked set of conflict-free meeting slots, then commits the chosen one as a confirmed event. It is the <strong>anchor module</strong>: resource planning and financial planning are both invoked from the event it creates.</p>
+
+<h3>Files you own</h3>
+<pre class="code">api/app/features/scheduling/
+├── __init__.py        <span class="c"># exports router + on_event_confirmed hook registration</span>
+├── router.py          <span class="c"># FastAPI routes only — parse, call service, return</span>
+├── schemas.py         <span class="c"># Pydantic request/response + LLM output schemas</span>
+├── service.py         <span class="c"># business logic, the only layer that writes to the DB</span>
+├── scoring.py         <span class="c"># PURE functions, no I/O, no LLM — unit tested</span>
+└── agent.py           <span class="c"># LLM prompts + tool definitions</span>
+
+api/app/models/
+├── org.py             <span class="c"># organizations, members, venues  (shared, you create)</span>
+└── scheduling.py      <span class="c"># busy_blocks, scheduling_requests, slot_proposals,</span>
+                       <span class="c"># events, event_attendees</span></pre>
+
+<h3>Also yours: hour 0–2 scaffolding</h3>
+<p>Nobody else can start until these exist. Ship them first, merge to <code>main</code>, tell the team.</p>
+<ul>
+<li>Repo scaffold with the layout from the handbook</li>
+<li>Alembic migration <code>0001_core</code> — the shared tables</li>
+<li><code>app/core/hooks.py</code> — the in-process dispatcher (see §6)</li>
+<li><code>/health</code> returning 200, deployed to Render</li>
+</ul>
+
+<h2>2. Module Placement Inside the Monolith</h2>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  subgraph PROC["Single FastAPI process — Render web service"]
+    direction TB
+    RT["scheduling/router.py<br/>/api/scheduling/*"]
+    BOTC["bot/commands/plan.py<br/>/plan slash command"]
+    SVC["scheduling/service.py<br/>orchestration + DB writes"]
+    AGT["scheduling/agent.py<br/>LLM parse + explain"]
+    SCO["scheduling/scoring.py<br/>pure, deterministic"]
+    HOOK["core/hooks.py<br/>in-process dispatcher"]
+    RES["features/resources/service.py"]
+    FIN["features/finance/service.py"]
+
+    RT --> SVC
+    BOTC --> SVC
+    SVC --> AGT
+    SVC --> SCO
+    SVC --> HOOK
+    HOOK -->|"direct call, same session"| RES
+    HOOK -->|"direct call, same session"| FIN
+  end
+
+  UI["React dashboard<br/>Vercel"] -->|HTTPS| RT
+  DC["Discord Gateway"] <-->|WebSocket| BOTC
+  AGT --> MF["Microsoft Foundry"]
+  SVC --> DB[("Supabase Postgres<br/>one shared AsyncSession")]
+  RES --> DB
+  FIN --> DB
+</pre>
+</div>
+<p>Both entry points — the REST route and the Discord command — call the same <code>service.py</code> function. The bot is a thin adapter, never a second implementation.</p>
+
+<h2>3. End-to-End Sequence — “Plan a meeting”</h2>
+<p>Participants below are <em>modules in one process</em>. Solid arrows are function calls, not requests.</p>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as Organizer
+  participant CMD as bot/commands/plan.py
+  participant SVC as scheduling/service.py
+  participant AGT as scheduling/agent.py
+  participant MF as Microsoft Foundry
+  participant SCO as scheduling/scoring.py
+  participant DB as AsyncSession
+
+  U->>CMD: /plan "2h exec meeting next week before Friday"
+  CMD->>CMD: interaction.response.defer(thinking=True)
+  CMD->>SVC: create_request(org_id, prompt, member_id)
+  SVC->>DB: INSERT scheduling_requests status=parsing
+
+  SVC->>AGT: parse_intent(prompt)
+  AGT->>MF: chat completion, JSON schema
+  MF-->>AGT: raw JSON
+  AGT->>AGT: Pydantic validate, retry on failure
+  AGT-->>SVC: Constraints
+  SVC->>DB: UPDATE parsed_constraints JSONB
+
+  SVC->>DB: SELECT members + priority_weight
+  SVC->>DB: SELECT busy_blocks in window
+  SVC->>SCO: score_slots(constraints, members, busy)
+  Note over SCO: Pure function. No DB, no LLM.<br/>Same input always gives same output.
+  SCO-->>SVC: ranked ScoredSlot list
+  SVC->>DB: INSERT slot_proposals, top 5
+
+  SVC->>AGT: explain_ranking(top_3)
+  AGT->>MF: chat completion
+  MF-->>AGT: rationale text
+  SVC-->>CMD: proposals + rationale
+  CMD->>U: followup.send(embed with buttons)
+
+  U->>CMD: click "Confirm Tue 7pm"
+  CMD->>SVC: confirm_proposal(proposal_id, member_id)
+  Note over SVC,DB: See section 6 — one transaction<br/>spanning all three modules.
+  SVC-->>CMD: EventPlan(event, reservations, budget)
+  CMD->>U: combined embed, announce to #events
+</pre>
+</div>
+
+<h2>4. Slot Scoring Algorithm</h2>
+<p>Deterministic and pure — the LLM parses and explains, it never scores. This is what makes the module demo-reliable and defensible to judges.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+  A["Parsed constraints"] --> B["Generate candidate slots<br/>30-min granularity across window"]
+  B --> C{"Inside org quiet hours?"}
+  C -- yes --> X["Discard"]
+  C -- no --> D["Join busy_blocks per member"]
+  D --> E{"Hard conflict?<br/>exam or class"}
+  E -- "any required member" --> X
+  E -- no --> F["Weighted attendance<br/>sum of priority_weight of free members"]
+  F --> G["Apply soft penalties"]
+  G --> G1["late night after 21:00"]
+  G --> G2["back-to-back with another org event"]
+  G --> G3["exam week proximity"]
+  G --> G4["fairness debt: member always excluded"]
+  G1 --> H["score = attendance_pct * 100 - penalties"]
+  G2 --> H
+  G3 --> H
+  G4 --> H
+  H --> I["Deduplicate overlaps<br/>best per 3-hour bucket"]
+  I --> J["Rank desc, take top 5"]
+  J --> K["Return to service.py for persistence"]
+</pre>
+</div>
+
+<h3>Scoring reference</h3>
+<table>
+<tr><th>Component</th><th>Rule</th><th>Weight</th></tr>
+<tr><td>Weighted attendance</td><td>Σ(priority_weight) of free members ÷ Σ(all required)</td><td>0–100 base</td></tr>
+<tr><td>Role weighting</td><td>president = 3, exec/treasurer = 2, member = 1</td><td>multiplier</td></tr>
+<tr><td>Exam proximity</td><td>within 48h of a <code>busy_blocks.kind = 'exam'</code></td><td>−25</td></tr>
+<tr><td>Late night</td><td>start ≥ 21:00 org-local</td><td>−15</td></tr>
+<tr><td>Back-to-back</td><td>&lt; 30 min gap from another org event</td><td>−10</td></tr>
+<tr><td>Fairness debt</td><td>member missed ≥ 2 of last 5 events</td><td>−5 per member</td></tr>
+<tr><td>Hard conflict</td><td>required member has <code>exam</code> or <code>class</code></td><td>eliminate</td></tr>
+</table>
+
+<h3>Signature — keep it pure</h3>
+<pre class="code"><span class="c"># app/features/scheduling/scoring.py</span>
+<span class="c"># No imports from app.db, app.models, or app.core.llm.</span>
+<span class="c"># Takes plain data in, returns plain data out. Trivially testable.</span>
+
+def score_slots(
+    constraints: Constraints,
+    members: Sequence[MemberView],       <span class="c"># id, weight, required</span>
+    busy: Sequence[BusyInterval],        <span class="c"># member_id, kind, start, end</span>
+    existing_events: Sequence[Interval],
+    fairness: Mapping[UUID, int],        <span class="c"># member_id -> missed count</span>
+) -&gt; list[ScoredSlot]: ...</pre>
+
+<h2>5. State Machines</h2>
+<div class="diagram">
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> parsing: request received
+  parsing --> proposing: constraints extracted
+  parsing --> failed: unparseable after retries
+  proposing --> awaiting_choice: proposals posted
+  awaiting_choice --> confirmed: organizer picks slot
+  awaiting_choice --> expired: no reply in 24h
+  awaiting_choice --> proposing: "try other times"
+  confirmed --> [*]
+  failed --> [*]
+  expired --> [*]
+</pre>
+</div>
+<div class="diagram">
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> draft
+  draft --> confirmed: slot chosen
+  confirmed --> rescheduled: calendar change invalidates
+  rescheduled --> confirmed: new slot accepted
+  confirmed --> completed: end time passes
+  confirmed --> cancelled
+  completed --> [*]
+  cancelled --> [*]
+</pre>
+</div>
+
+<h2>6. The Confirm Transaction — Monolith Payoff</h2>
+<p>This is the section that changed most from a service-oriented design, and it is the strongest technical argument for the monolith.</p>
+<p>Confirming a slot must write to <strong>all three modules' tables</strong>: create the event, hold the resources, draft the budget. In one process this is a <strong>single database transaction</strong>. If the budget draft fails, the resource holds and the event roll back automatically — the org never ends up with a projector reserved for an event that does not exist.</p>
+<pre class="code"><span class="c"># app/features/scheduling/service.py</span>
+from app.features.resources import service as resources_service
+from app.features.finance   import service as finance_service
+
+async def confirm_proposal(
+    db: AsyncSession, proposal_id: UUID, actor_id: UUID
+) -&gt; EventPlan:
+    """One transaction across all three modules.
+    Either the whole plan commits, or none of it does."""
+
+    async with db.begin():                       <span class="c"># BEGIN</span>
+        proposal = await _load_proposal(db, proposal_id)
+        event    = await _create_event(db, proposal, actor_id)
+        await _add_attendees(db, event, proposal)
+
+        <span class="c"># Direct in-process calls. Same session, same transaction.</span>
+        <span class="c"># Not HTTP. Not a queue. Not a background task.</span>
+        reservations = await resources_service.plan_for_event(db, event)
+        budget       = await finance_service.draft_for_event(db, event, reservations)
+
+    <span class="c"># COMMIT happens here. Any exception above rolls back everything.</span>
+    return EventPlan(event=event, reservations=reservations, budget=budget)</pre>
+
+<h3>Why not an event bus?</h3>
+<table>
+<tr><th>Approach</th><th>Cost</th><th>Verdict</th></tr>
+<tr><td>Direct import + call</td><td>Coupling between packages</td><td><strong>Use this.</strong> Atomic, debuggable, zero infrastructure</td></tr>
+<tr><td>In-process dispatcher (dict of hooks)</td><td>Indirection; harder to trace in a stack trace</td><td>Acceptable if you want looser coupling — still one transaction</td></tr>
+<tr><td>Redis / Celery / RabbitMQ</td><td>Extra Render service, extra failure mode, eventual consistency</td><td><strong>Do not.</strong> Zero demo value, real risk</td></tr>
+</table>
+<div class="warn"><strong>Circular import warning.</strong> Scheduling imports resources and finance. If either of those imports scheduling back, Python will fail at startup. Rule: <strong>scheduling may import the other two; they must never import scheduling.</strong> If they need event data, they receive it as a function argument. If you hit a cycle anyway, move the shared types into <code>app/core/types.py</code>.</div>
+
+<h2>7. API Surface</h2>
+<p>All routes mounted under <code>/api/scheduling</code> in <code>app/main.py</code>.</p>
+<table>
+<tr><th>Method &amp; path</th><th>Purpose</th><th>Key response fields</th></tr>
+<tr><td><code>POST /requests</code></td><td>Submit natural-language scheduling request</td><td><code>request_id</code>, <code>status</code></td></tr>
+<tr><td><code>GET /requests/{id}</code></td><td>Poll parse + proposal status</td><td><code>parsed_constraints</code>, <code>proposals[]</code></td></tr>
+<tr><td><code>GET /requests/{id}/proposals</code></td><td>Ranked slots with conflict breakdown</td><td><code>start_utc</code>, <code>score</code>, <code>attendance_pct</code>, <code>conflicts[]</code></td></tr>
+<tr><td><code>POST /proposals/{id}/confirm</code></td><td>Commit slot — runs the §6 transaction</td><td><code>event</code>, <code>reservations[]</code>, <code>budget</code></td></tr>
+<tr><td><code>GET /availability?org_id=&amp;from=&amp;to=</code></td><td>Heatmap data for the React dashboard</td><td><code>grid[day][hour] = free_count</code></td></tr>
+<tr><td><code>POST /members/{id}/calendar/sync</code></td><td>Import ICS feed into busy_blocks</td><td><code>imported_count</code></td></tr>
+<tr><td><code>GET /events?org_id=&amp;from=&amp;to=</code></td><td>Event list for the calendar view</td><td><code>events[]</code></td></tr>
+</table>
+<p>Note that <code>POST /proposals/{id}/confirm</code> returns the event <em>and</em> the resource plan <em>and</em> the budget in one response. That is only possible because it is one transaction — and it is what lets the Discord bot render a single combined embed rather than three that trickle in.</p>
+
+<h2>8. Agent Tools</h2>
+<pre class="code"><span class="c"># app/features/scheduling/agent.py</span>
+
+async def parse_intent(prompt: str) -&gt; Constraints
+    <span class="c"># LLM. JSON schema, Pydantic-validated, 2 retries.</span>
+    <span class="c"># Returns duration_minutes, window_start, window_end,</span>
+    <span class="c"># attendee_group, must_be_before, preferred_time_of_day</span>
+
+async def explain_ranking(slots: list[ScoredSlot]) -&gt; str
+    <span class="c"># LLM. Cosmetic only — never influences the ranking.</span>
+
+<span class="c"># Everything else is deterministic and lives in scoring.py or service.py.</span></pre>
+
+<h2>9. Tables Owned</h2>
+<table>
+<tr><th>Table</th><th>Access</th></tr>
+<tr><td><code>organizations</code>, <code>members</code>, <code>venues</code></td><td>You create them in <code>0001_core</code>; all modules read</td></tr>
+<tr><td><code>busy_blocks</code></td><td>Scheduling writes</td></tr>
+<tr><td><code>scheduling_requests</code>, <code>slot_proposals</code></td><td>Scheduling exclusive</td></tr>
+<tr><td><code>events</code>, <code>event_attendees</code></td><td>Scheduling writes; B and C read only</td></tr>
+</table>
+
+<h2>10. Build Checklist — 24 Hours</h2>
+<table>
+<tr><th>Hours</th><th>Deliverable</th><th>Definition of done</th></tr>
+<tr><td>0–2</td><td>Repo scaffold, <code>0001_core</code>, <code>/health</code> live on Render</td><td>B and C can <code>alembic upgrade head</code> and start</td></tr>
+<tr><td>2–5</td><td>Seed script: 12 members, 3 weeks of busy_blocks</td><td>One command reproduces demo data</td></tr>
+<tr><td>5–10</td><td><code>scoring.py</code> + unit tests</td><td>Fixture input gives stable ranked output</td></tr>
+<tr><td>10–14</td><td><code>agent.parse_intent</code> + <code>POST /requests</code></td><td>curl a prompt, get 3 ranked proposals</td></tr>
+<tr><td>14–18</td><td>Confirm transaction wired to B and C</td><td>One call returns event + reservations + budget</td></tr>
+<tr><td>18–21</td><td><code>/availability</code> heatmap endpoint</td><td>Dashboard renders it</td></tr>
+<tr><td>21–24</td><td>Integration, demo rehearsal</td><td>Full flow runs twice without a restart</td></tr>
+</table>
+<div class="note"><strong>Fallback if calendar import stalls:</strong> skip ICS entirely and seed <code>busy_blocks</code> directly. The demo is identical from the judges' seats, and it removes the only external dependency in this module.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad:true, theme:'base', securityLevel:'loose',
+  themeVariables:{
+    primaryColor:'#FDECEE', primaryTextColor:'#1A1A2E', primaryBorderColor:'#C8102E',
+    lineColor:'#8A8A9A', secondaryColor:'#F5F5F7', tertiaryColor:'#FAFAFB',
+    fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Inter,sans-serif', fontSize:'14px'
+  },
+  flowchart:{ curve:'basis', padding:14 },
+  sequence:{ actorMargin:40, boxMargin:8 }
+});
+</script>

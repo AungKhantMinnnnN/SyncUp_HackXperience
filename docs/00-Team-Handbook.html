@@ -1,0 +1,760 @@
+<meta charset="utf-8">
+<title>SyncUp — Team Handbook</title>
+<style>
+  :root { --accent:#C8102E; --dark:#1A1A2E; --gray:#5A5A6E; --line:#E3E3E8; --bg:#FFFFFF; --soft:#FAFAFB; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; color:var(--dark);
+         background:var(--bg); margin:0; padding:48px 40px 100px; line-height:1.65; max-width:1050px; margin-inline:auto; }
+  h1 { font-size:42px; margin:0 0 6px; color:var(--accent); letter-spacing:-.02em; }
+  .sub { font-size:20px; margin:0 0 6px; }
+  .meta { font-size:13px; color:var(--gray); padding-bottom:18px; border-bottom:3px solid var(--accent); margin-bottom:12px; }
+  h2 { font-size:27px; margin:52px 0 10px; color:var(--accent); padding-top:8px; border-top:1px solid var(--line); }
+  h3 { font-size:19px; margin:32px 0 6px; }
+  h4 { font-size:16px; margin:22px 0 4px; color:var(--gray); text-transform:uppercase; letter-spacing:.05em; font-size:13px; }
+  p, li { font-size:15px; }
+  code { background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:13px; }
+  pre.code { background:#1A1A2E; color:#E8E8EE; border-radius:8px; padding:16px 18px; overflow-x:auto;
+             font-size:12.5px; line-height:1.55; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre.code .c { color:#8A93A8; }
+  table { border-collapse:collapse; width:100%; margin:14px 0 6px; font-size:14px; }
+  th { background:var(--accent); color:#fff; text-align:left; padding:9px 11px; font-weight:600; }
+  td { border-bottom:1px solid var(--line); padding:9px 11px; vertical-align:top; }
+  tr:nth-child(even) td { background:var(--soft); }
+  .diagram { border:1px solid var(--line); border-radius:12px; padding:20px; margin:18px 0; background:#fff; overflow-x:auto; }
+  .note { border-left:4px solid var(--accent); background:var(--soft); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .warn { border-left:4px solid #B8860B; background:#FFFBEB; padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .tag { display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:99px; color:#fff; letter-spacing:.04em; }
+  .a{background:#C8102E;} .b{background:#1A6E8E;} .c{background:#2E7D4F;} .s{background:#5A5A6E;}
+  nav { background:var(--soft); border:1px solid var(--line); border-radius:12px; padding:18px 24px; margin:28px 0 8px; }
+  nav ol { margin:0; padding-left:20px; columns:2; column-gap:36px; font-size:14px; }
+  nav li { margin:3px 0; break-inside:avoid; }
+  a { color:var(--accent); }
+</style>
+
+<h1>SyncUp Team Handbook</h1>
+<p class="sub">AI Operations Manager for Student Organizations</p>
+<p class="meta">Track 2 · Subtrack 2A &nbsp;|&nbsp; 3 members · 24 hours &nbsp;|&nbsp; Python FastAPI · React · PostgreSQL/Supabase · Microsoft Foundry &nbsp;|&nbsp; Render + Vercel + Supabase</p>
+
+<nav>
+<ol>
+<li><a href="#s1">What we are building</a></li>
+<li><a href="#s2">Team &amp; ownership</a></li>
+<li><a href="#s3">Business logic — Scheduling</a></li>
+<li><a href="#s4">Business logic — Resource planning</a></li>
+<li><a href="#s5">Business logic — Financial planning</a></li>
+<li><a href="#s6">How the three features connect</a></li>
+<li><a href="#s7">System architecture — the monolith</a></li>
+<li><a href="#s8">Repository layout</a></li>
+<li><a href="#s9">Environment setup — prerequisites</a></li>
+<li><a href="#s10">Supabase setup</a></li>
+<li><a href="#s11">Backend setup</a></li>
+<li><a href="#s12">Frontend setup</a></li>
+<li><a href="#s13">Microsoft Foundry setup</a></li>
+<li><a href="#s14">Discord bot setup</a></li>
+<li><a href="#s15">Environment variables</a></li>
+<li><a href="#s16">Deployment — Render, Vercel, Supabase</a></li>
+<li><a href="#s17">Git workflow &amp; conventions</a></li>
+<li><a href="#s18">Integration contracts</a></li>
+<li><a href="#s19">Demo runbook</a></li>
+<li><a href="#s20">Troubleshooting</a></li>
+</ol>
+</nav>
+
+<h2 id="s1">1. What We Are Building</h2>
+<p><strong>SyncUp is a chief of staff for student organizations.</strong> An organizer describes an event in plain English inside their Discord server, and SyncUp does three things in one conversation: finds a time that actually works for the people who matter, reserves the equipment and room, and drafts a budget the org can afford.</p>
+
+<h3>The problem, precisely</h3>
+<p>Student orgs are run by volunteers with no shared calendar, no inventory system, and a budget that lives in a spreadsheet somebody's predecessor made. Three specific failures repeat every semester:</p>
+<ul>
+<li><strong>Scheduling by poll.</strong> Someone posts five options in a group chat, six people reply, three don't, and the meeting lands during an exam week anyway.</li>
+<li><strong>Resource collisions.</strong> Two committees book the same projector because nobody tracks it. This is discovered on the day.</li>
+<li><strong>Budget drift.</strong> Nobody knows the remaining semester balance until the treasurer reconciles at the end, by which point it's overspent.</li>
+</ul>
+
+<h3>The insight that makes it one product</h3>
+<p>All three failures are the same problem: <strong>an unmanaged constraint that only surfaces after commitment.</strong> A person is busy 7–9pm. A projector is booked 7–9pm. A budget line is spent. Each is a claim on a limited resource across an interval, and each collision is an overlap that a computer can detect before a human commits.</p>
+<div class="note">This is the pitch, and it's also the architecture. <strong>One conflict-detection primitive, three domains.</strong> That's why this reads as a coherent product built by three people rather than three hackathon demos stapled together — and it's the answer when a judge asks "why is this one app?"</div>
+
+<h2 id="s2">2. Team &amp; Ownership</h2>
+<table>
+<tr><th>Member</th><th>Feature</th><th>Owns in code</th><th>Owns in DB</th></tr>
+<tr><td><span class="tag a">A</span></td><td>Scheduling</td><td><code>app/features/scheduling/</code> + core scaffolding</td><td><code>organizations</code>, <code>members</code>, <code>venues</code>, <code>busy_blocks</code>, <code>scheduling_requests</code>, <code>slot_proposals</code>, <code>events</code>, <code>event_attendees</code></td></tr>
+<tr><td><span class="tag b">B</span></td><td>Resource planning</td><td><code>app/features/resources/</code></td><td><code>resources</code>, <code>resource_reservations</code>, <code>packing_list_items</code></td></tr>
+<tr><td><span class="tag c">C</span></td><td>Financial planning</td><td><code>app/features/finance/</code> + React shell</td><td><code>budgets</code>, <code>event_budgets</code>, <code>budget_line_items</code>, <code>expenses</code></td></tr>
+</table>
+<p><strong>Ownership rule:</strong> one writer per table, everyone reads. If you need a column in someone else's table, ask them to add it — do not edit their model or migration file.</p>
+
+<h3>Shared duties</h3>
+<ul>
+<li><strong>Member A also owns hour 0–2:</strong> repo scaffold, core migration, and a running <code>/health</code> endpoint deployed to Render. Nobody else can start until this exists.</li>
+<li><strong>Member C also owns the React shell:</strong> routing, layout, API client, and deploy to Vercel. A and B write only their own page components against it.</li>
+<li><strong>Member B also owns the Discord bot skeleton:</strong> command registration and the embed helpers. A and C register their own commands into it.</li>
+</ul>
+
+<h2 id="s3">3. Business Logic — Scheduling <span class="tag a">MEMBER A</span></h2>
+
+<h3>Why "who is free" is the wrong question</h3>
+<p>Naive schedulers intersect everyone's free time and return the gaps. In a student org that returns nothing — with twelve members and real course loads, there is frequently <em>no</em> slot where all twelve are free. A tool that answers "no times available" is worse than the group chat it replaced.</p>
+<p>So SyncUp asks a different question: <strong>which slot loses the least?</strong> Every candidate slot gets a score, and the organizer picks from ranked trade-offs rather than waiting for a perfect answer that does not exist.</p>
+
+<h3>Weighted attendance</h3>
+<p>Not every absence costs the same. A budget approval meeting without the treasurer is worthless; the same meeting without one general member is fine. Members carry a <code>priority_weight</code>:</p>
+<table>
+<tr><th>Role</th><th>Weight</th><th>Reasoning</th></tr>
+<tr><td>president</td><td>3</td><td>Meeting typically cannot proceed without them</td></tr>
+<tr><td>exec / treasurer</td><td>2</td><td>Decision-makers for their domain</td></tr>
+<tr><td>member</td><td>1</td><td>Valuable but substitutable</td></tr>
+</table>
+<p>Attendance score is the weighted fraction of required attendees who are free, not the headcount. A slot where 8 of 12 are free but the president is missing scores below a slot where 7 of 12 are free and all exec are present. This one decision produces most of the "it actually understands our org" feeling in the demo.</p>
+
+<h3>Hard vs soft constraints</h3>
+<p>Some conflicts eliminate a slot; others merely cost it points. Getting this split right is what separates a useful tool from an annoying one.</p>
+<table>
+<tr><th>Type</th><th>Examples</th><th>Effect</th></tr>
+<tr><td>Hard</td><td>Exam, timetabled class, explicit "must be before Friday"</td><td>Slot is removed entirely</td></tr>
+<tr><td>Soft</td><td>Part-time shift, other club, late night, exam proximity</td><td>Point penalty; slot survives</td></tr>
+</table>
+<p>The rationale: a student <em>cannot</em> skip an exam, but they might move a shift for something important. Treating a shift as hard silently throws away workable options; treating an exam as soft produces a suggestion that destroys the tool's credibility the moment a judge reads it.</p>
+
+<h3>The fairness problem</h3>
+<p>Pure optimization has an ugly failure mode: it will repeatedly pick the slot that excludes the same person, because that person's schedule is the awkward one. Over a semester, that member quietly stops being part of the org.</p>
+<p>SyncUp tracks a <strong>fairness debt</strong> — how often each member has been the one excluded across recent events — and applies a growing penalty to slots that exclude someone already carrying debt. The system deliberately accepts a slightly worse slot to avoid systematically sidelining a person.</p>
+<div class="note">This is worth a sentence in the pitch. It shows the team thought about what optimization does to people, not just about the optimizer. It also costs about fifteen lines of code.</div>
+
+<h3>Why the LLM does not score</h3>
+<p>The model has exactly two jobs in this feature: turn a sentence into structured constraints, and turn a ranked list into a readable explanation. Every number is computed by deterministic Python.</p>
+<ul>
+<li><strong>Reproducibility.</strong> The same request twice gives the same answer. LLM scoring drifts, and drifting on stage is fatal.</li>
+<li><strong>Explainability.</strong> "Tuesday scores 82 because 10 of 12 weighted attendance minus 15 for late start" is auditable. "The AI thought Tuesday was good" is not.</li>
+<li><strong>Speed and cost.</strong> Scoring 300 candidate slots via an LLM is slow and burns free-tier quota. In Python it is microseconds.</li>
+</ul>
+
+<h2 id="s4">4. Business Logic — Resource Planning <span class="tag b">MEMBER B</span></h2>
+
+<h3>A reservation is an interval claim</h3>
+<p>The core model: a reservation claims <em>N units of resource R over interval [start, end)</em>. Availability is total quantity minus the sum of overlapping claims. That single sentence covers a projector, 100 chairs, and a room — the code does not branch per item type.</p>
+<p>Two resource kinds fall out of it naturally:</p>
+<table>
+<tr><th>Kind</th><th>Example</th><th>Rule</th></tr>
+<tr><td>Exclusive</td><td>The projector, a specific room</td><td>Any overlap is a conflict. Enforced by a PostgreSQL exclusion constraint</td></tr>
+<tr><td>Pooled</td><td>Chairs, microphones, tablecloths</td><td>Overlap is fine until summed quantity exceeds stock. Checked in a serializable transaction</td></tr>
+</table>
+
+<h3>Why holds expire</h3>
+<p>When a packing list is generated, resources are placed on <strong>hold</strong> with a 30-minute TTL rather than being confirmed outright. This exists because of a real behaviour: an organizer opens the bot, gets a plan, then goes to dinner without pressing approve.</p>
+<ul>
+<li>Confirming immediately would lock the projector for an event that never happens.</li>
+<li>Not reserving at all creates a race — two organizers both see it as available and both approve.</li>
+</ul>
+<p>The hold is a soft claim that decays. A background job sweeps expired holds every five minutes and releases them. This is standard practice in ticketing and hotel systems, and saying so out loud is a credibility signal in the pitch.</p>
+
+<h3>Why the double-booking guard lives in the database</h3>
+<p>Application-level checks — read availability, then insert — have a window between the read and the write where a second request can slip through. Under demo conditions with two people clicking at once, this reliably breaks.</p>
+<p>PostgreSQL's <code>btree_gist</code> exclusion constraint makes the overlap rule a property of the data rather than a property of the code path. It is impossible to insert a conflicting exclusive reservation, regardless of what the application does. Concurrency correctness enforced by the schema is a genuinely strong technical detail for a 24-hour project.</p>
+
+<h3>What the LLM contributes, and its leash</h3>
+<p>The model infers a packing list from an event description — "orientation night, 100 people" becomes projector, 2 mics, sign-in table, 100 chairs. This is real value: it is judgment about the physical world that a rules engine cannot supply.</p>
+<p>Its output is constrained hard:</p>
+<ul>
+<li>The org's actual inventory is injected into the prompt as context, so it proposes things you plausibly own.</li>
+<li>Output is a JSON schema validated by Pydantic — malformed responses are rejected, not patched.</li>
+<li><strong>Resource IDs are matched server-side by name.</strong> A hallucinated ID is impossible to act on because the model's IDs are never trusted.</li>
+<li>Anything unmatched becomes an "unowned item" and flows to finance as a rental line, rather than erroring.</li>
+</ul>
+<p>The pattern generalizes: <em>the model proposes in an open vocabulary; the system resolves against a closed one.</em></p>
+
+<h2 id="s5">5. Business Logic — Financial Planning <span class="tag c">MEMBER C</span></h2>
+
+<h3>Three numbers, not one</h3>
+<p>The most common bug in budget software is treating "spent" as a single figure. SyncUp keeps three:</p>
+<table>
+<tr><th>Number</th><th>Meaning</th><th>Source</th></tr>
+<tr><td><code>allocated</code></td><td>What the org was given this semester</td><td>Set once per semester</td></tr>
+<tr><td><code>committed</code></td><td>Approved for events that haven't happened yet</td><td>Sum of approved <code>estimated_total</code></td></tr>
+<tr><td><code>actual</code></td><td>Money genuinely out the door</td><td>Sum of approved expenses</td></tr>
+</table>
+<p><code>remaining = allocated − committed − actual</code>. The committed figure is the one that matters and the one spreadsheets always miss: an org with $500 left and $450 already promised to next week's event does not have $500. Once an event completes, its committed amount is replaced by its actual spend so nothing is double-counted.</p>
+
+<h3>Why estimates are anchored to history</h3>
+<p>Asking a language model "what does catering for 100 students cost?" produces a plausible number from a general prior — which may be badly wrong for your campus, your currency, and your usual vendor.</p>
+<p>So before drafting, SyncUp queries the org's own past line items for each category and injects those averages into the prompt. The model's job shifts from <em>inventing prices</em> to <em>applying known prices to a new event's scale</em>. This is why seeding four past events with realistic spend matters: it makes the second budget visibly smarter than the first, which is a story you can tell on stage.</p>
+
+<h3>The LLM never touches arithmetic</h3>
+<p>The model proposes line items — category, description, unit cost, quantity. Python computes every total using <code>Decimal</code>:</p>
+<pre class="code">line_total      = unit_cost * quantity
+subtotal        = sum(line_totals)
+contingency     = subtotal * Decimal("0.10")
+estimated_total = subtotal + contingency</pre>
+<p>Two reasons. First, models make arithmetic errors, and a budget whose column does not add up is the single most damaging thing a judge can notice. Second, currency in binary floating point produces drift — <code>NUMERIC(12,2)</code> in PostgreSQL and <code>Decimal</code> in Python, never <code>float</code>, anywhere.</p>
+<p>The flat 10% contingency is deliberate: real student events overrun, and a tool that budgets to the cent teaches orgs a bad habit.</p>
+
+<h3>Warn, then block</h3>
+<p>Three verdicts, because a binary yes/no is either too permissive or too rigid:</p>
+<table>
+<tr><th>Verdict</th><th>Condition</th><th>Behaviour</th></tr>
+<tr><td><code>OK</code></td><td>Remaining after event ≥ 0</td><td>Approve normally</td></tr>
+<tr><td><code>TIGHT</code></td><td>Overruns by up to 10% of allocation</td><td>Warn loudly, still allow — orgs sometimes have good reasons</td></tr>
+<tr><td><code>OVER</code></td><td>Overruns by more than 10%</td><td>Block approval; agent proposes ranked cuts</td></tr>
+</table>
+<p>The design principle: <strong>the agent advises, the human decides.</strong> Suggested cuts are never auto-applied. An AI that silently deletes a line from a budget is an AI nobody trusts with a budget.</p>
+
+<h2 id="s6">6. How the Three Features Connect</h2>
+<p>Two internal events chain the pipeline. Agree on these payloads in hour one and the three of you never block each other.</p>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as Organizer
+  participant S as Scheduling
+  participant R as Resources
+  participant F as Finance
+
+  U->>S: "Plan orientation night, 100 people, $300"
+  S->>S: parse, score slots, rank
+  S-->>U: 3 ranked options
+  U->>S: approve slot
+  S->>R: EVENT_CONFIRMED {event_id}
+  R->>R: infer packing list, check availability, hold
+  R-->>U: packing list + 1 conflict flagged
+  U->>R: approve list
+  R->>F: RESOURCES_CONFIRMED {event_id, unowned_items[]}
+  F->>F: price lines, check headroom
+  F-->>U: itemised budget + remaining balance
+  U->>F: approve budget
+  F-->>U: committed, announced to #events
+</pre>
+</div>
+<pre class="code"><span class="c"># app/core/events.py — the entire integration surface</span>
+
+@dataclass(frozen=True)
+class EventConfirmed:
+    event_id: UUID
+    org_id: UUID
+    title: str
+    description: str | None
+    start_utc: datetime
+    end_utc: datetime
+    expected_attendance: int | None
+    venue_id: UUID | None
+    stated_cap: Decimal | None   <span class="c"># budget hint from the prompt</span>
+
+@dataclass(frozen=True)
+class ResourcesConfirmed:
+    event_id: UUID
+    org_id: UUID
+    unowned_items: list[UnownedItem]   <span class="c"># name, quantity, est_cost</span>
+    venue_cost: Decimal</pre>
+<div class="note"><strong>In a monolith these are in-process function calls, not a message queue.</strong> A simple synchronous dispatcher — a dict of event type to handler list — is the right call for 24 hours. Do not add Redis, Celery, or RabbitMQ. They add deployment surface and failure modes for zero demo value.</div>
+
+<h2 id="s7">7. System Architecture — The Monolith</h2>
+<p>One FastAPI process serves the REST API <em>and</em> runs the Discord bot as a background task, backed by one Supabase Postgres database, with a separately deployed React SPA.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  subgraph V["Vercel"]
+    UI["React SPA<br/>Vite + TypeScript"]
+  end
+  subgraph RN["Render — single web service"]
+    direction TB
+    U["Uvicorn"]
+    F["FastAPI app"]
+    BOT["discord.py client<br/>asyncio background task"]
+    SCH["APScheduler<br/>hold expiry, reminders"]
+    subgraph FEAT["Feature modules"]
+      SC["scheduling"]
+      RS["resources"]
+      FN["finance"]
+    end
+    U --> F
+    F --> FEAT
+    BOT --> FEAT
+    SCH --> FEAT
+  end
+  subgraph SB["Supabase"]
+    PG[("PostgreSQL 16<br/>btree_gist")]
+  end
+  MF["Microsoft Foundry<br/>chat completions"]
+  DC["Discord Gateway"]
+
+  UI -->|HTTPS REST| F
+  FEAT --> PG
+  FEAT --> MF
+  BOT <-->|WebSocket| DC
+</pre>
+</div>
+
+<h3>Why a monolith is correct here</h3>
+<ul>
+<li><strong>One deploy target.</strong> Render free tier gives one always-on-ish web service. Splitting the bot into its own service doubles cold-start pain for no benefit.</li>
+<li><strong>Shared transactions.</strong> Confirming an event writes to events, reservations, and budgets. In one process that is one database transaction. Across services it is a distributed-transaction problem you do not have time to solve.</li>
+<li><strong>Feature modules give you the boundaries anyway.</strong> Each member works inside their own package with a defined interface. You get parallel work without network hops.</li>
+</ul>
+<p>The bot runs inside the API process via FastAPI's <code>lifespan</code>, launched as an asyncio task. It shares the same connection pool, the same models, and the same feature services — a Discord command is a thin adapter over the same function the REST endpoint calls.</p>
+
+<h2 id="s8">8. Repository Layout</h2>
+<p>Single repo, two deployable directories.</p>
+<pre class="code">syncup/
+├── api/                          <span class="c"># → Render</span>
+│   ├── app/
+│   │   ├── main.py               <span class="c"># FastAPI app, lifespan, CORS, router mounts</span>
+│   │   ├── config.py             <span class="c"># pydantic-settings, reads env vars</span>
+│   │   ├── db.py                 <span class="c"># async engine, session dependency</span>
+│   │   ├── core/
+│   │   │   ├── events.py         <span class="c"># EventConfirmed / ResourcesConfirmed + dispatcher</span>
+│   │   │   ├── llm.py            <span class="c"># Foundry client wrapper + JSON-schema helper</span>
+│   │   │   ├── time.py           <span class="c"># UTC helpers, interval overlap utilities</span>
+│   │   │   └── security.py       <span class="c"># API key / Discord signature check</span>
+│   │   ├── models/               <span class="c"># SQLAlchemy 2.0 ORM — one file per domain</span>
+│   │   │   ├── base.py
+│   │   │   ├── org.py            <span class="c"># A</span>
+│   │   │   ├── scheduling.py     <span class="c"># A</span>
+│   │   │   ├── resources.py      <span class="c"># B</span>
+│   │   │   └── finance.py        <span class="c"># C</span>
+│   │   ├── features/
+│   │   │   ├── scheduling/       <span class="c"># A: router.py schemas.py service.py scoring.py agent.py</span>
+│   │   │   ├── resources/        <span class="c"># B: router.py schemas.py service.py availability.py agent.py</span>
+│   │   │   └── finance/          <span class="c"># C: router.py schemas.py service.py headroom.py agent.py</span>
+│   │   ├── bot/
+│   │   │   ├── client.py         <span class="c"># discord.py setup, lifespan hook</span>
+│   │   │   ├── embeds.py         <span class="c"># shared embed builders</span>
+│   │   │   └── commands/         <span class="c"># plan.py resources.py budget.py</span>
+│   │   └── jobs/
+│   │       └── scheduler.py      <span class="c"># APScheduler: expire holds, reminders</span>
+│   ├── alembic/versions/         <span class="c"># 0001_core.py  0002_resources.py  0003_finance.py</span>
+│   ├── scripts/seed.py
+│   ├── tests/
+│   ├── pyproject.toml
+│   └── render.yaml
+├── web/                          <span class="c"># → Vercel</span>
+│   ├── src/
+│   │   ├── main.tsx  App.tsx
+│   │   ├── api/client.ts         <span class="c"># axios instance, VITE_API_BASE_URL</span>
+│   │   ├── components/           <span class="c"># shared UI</span>
+│   │   └── pages/
+│   │       ├── Calendar.tsx      <span class="c"># A</span>
+│   │       ├── Resources.tsx     <span class="c"># B</span>
+│   │       └── Budget.tsx        <span class="c"># C</span>
+│   ├── package.json
+│   └── vite.config.ts
+├── docs/                         <span class="c"># these handbook + flow files</span>
+└── README.md</pre>
+
+<h3>Module conventions</h3>
+<table>
+<tr><th>File</th><th>Contains</th><th>Rule</th></tr>
+<tr><td><code>router.py</code></td><td>FastAPI routes only</td><td>No business logic — parse, call service, return</td></tr>
+<tr><td><code>schemas.py</code></td><td>Pydantic request/response models</td><td>Also the LLM output schemas</td></tr>
+<tr><td><code>service.py</code></td><td>Business logic, DB access</td><td>The only layer that writes to the database</td></tr>
+<tr><td><code>scoring.py</code> / <code>availability.py</code> / <code>headroom.py</code></td><td>Pure functions</td><td>No I/O, no LLM. Unit-tested. This is where the defensible logic lives</td></tr>
+<tr><td><code>agent.py</code></td><td>LLM tool definitions and prompts</td><td>Calls pure functions; never computes</td></tr>
+</table>
+
+<h2 id="s9">9. Environment Setup — Prerequisites</h2>
+<table>
+<tr><th>Tool</th><th>Version</th><th>Check</th></tr>
+<tr><td>Python</td><td>3.12+</td><td><code>python --version</code></td></tr>
+<tr><td>Node</td><td>20+</td><td><code>node --version</code></td></tr>
+<tr><td>uv (recommended) or pip</td><td>latest</td><td><code>uv --version</code></td></tr>
+<tr><td>Git</td><td>any</td><td><code>git --version</code></td></tr>
+<tr><td>psql (optional, useful)</td><td>16</td><td><code>psql --version</code></td></tr>
+</table>
+<p>Accounts to create <strong>before</strong> the clock starts — every one is free, and each takes a few minutes you will not have later:</p>
+<ul>
+<li>GitHub (org repo)</li>
+<li>Supabase (database)</li>
+<li>Render (backend hosting)</li>
+<li>Vercel (frontend hosting)</li>
+<li>Discord — plus a test server you own, with admin rights</li>
+<li>Microsoft Foundry / Azure account for the model endpoint</li>
+</ul>
+
+<h2 id="s10">10. Supabase Setup</h2>
+<h4>Create the project</h4>
+<ol>
+<li>New project → pick the region nearest your venue → save the database password immediately, it is shown once.</li>
+<li>Wait for provisioning (~2 minutes).</li>
+<li><strong>Settings → Database → Connection string</strong>. Copy the <strong>Session pooler</strong> URI, not the direct connection.</li>
+</ol>
+<div class="warn"><strong>Critical gotcha.</strong> On the Supabase free plan the <em>direct</em> connection (<code>db.&lt;ref&gt;.supabase.co:5432</code>) is reachable over IPv6 only; the IPv4 add-on is a paid extra. Render does not give you IPv6 egress, so a direct connection string will fail with a connection error that looks like a firewall problem. The <strong>Shared Pooler (Supavisor)</strong> is IPv4 on every tier — use it. Session mode for a long-running API; transaction mode (port 6543) only if you later go serverless. Free tier also caps you at 500 MB storage, 500 MB RAM, and 200 pooler connections, all far beyond what this project needs.</div>
+
+<h4>Enable the extensions</h4>
+<p>Supabase SQL Editor → new query → run:</p>
+<pre class="code">CREATE EXTENSION IF NOT EXISTS pgcrypto;    <span class="c">-- gen_random_uuid()</span>
+CREATE EXTENSION IF NOT EXISTS btree_gist;  <span class="c">-- exclusion constraints</span>
+
+SELECT extname FROM pg_extension
+WHERE extname IN ('pgcrypto','btree_gist');   <span class="c">-- expect 2 rows</span></pre>
+
+<h4>Two databases, not one</h4>
+<p>Create a <strong>second free Supabase project</strong> called <code>syncup-dev</code>. Everyone develops against dev; only <code>main</code> deploys point at prod. Reseeding the demo database at hour 22 because someone was testing against it is a recoverable disaster you can simply avoid.</p>
+
+<h2 id="s11">11. Backend Setup</h2>
+<pre class="code">git clone git@github.com:&lt;org&gt;/syncup.git &amp;&amp; cd syncup/api
+
+uv venv &amp;&amp; source .venv/bin/activate      <span class="c"># Windows: .venv\Scripts\activate</span>
+uv pip install -e ".[dev]"
+
+cp .env.example .env                       <span class="c"># then fill it in — see section 15</span>
+
+alembic upgrade head                       <span class="c"># create schema</span>
+python scripts/seed.py                     <span class="c"># demo data</span>
+
+uvicorn app.main:app --reload --port 8000
+<span class="c"># → http://localhost:8000/docs</span></pre>
+
+<h4>pyproject.toml dependencies</h4>
+<pre class="code">dependencies = [
+  "fastapi&gt;=0.115",
+  "uvicorn[standard]&gt;=0.32",
+  "sqlalchemy&gt;=2.0",
+  "asyncpg&gt;=0.30",              <span class="c"># async Postgres driver</span>
+  "alembic&gt;=1.14",
+  "pydantic&gt;=2.9",
+  "pydantic-settings&gt;=2.6",
+  "openai&gt;=1.54",               <span class="c"># used against the Foundry endpoint</span>
+  "discord.py&gt;=2.4",
+  "apscheduler&gt;=3.10",
+  "python-dotenv&gt;=1.0",
+  "httpx&gt;=0.27",
+]
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]</pre>
+
+<h4>Database connection</h4>
+<pre class="code"><span class="c"># app/db.py</span>
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from app.config import settings
+
+engine = create_async_engine(
+    settings.database_url,          <span class="c"># postgresql+asyncpg://...pooler.supabase.com:5432/postgres</span>
+    pool_size=5, max_overflow=5,    <span class="c"># stay well under the pooler limit</span>
+    pool_pre_ping=True,             <span class="c"># survives Render idle disconnects</span>
+    echo=settings.sql_echo,
+)
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+async def get_db():
+    async with SessionLocal() as session:
+        yield session</pre>
+<div class="warn">The connection string Supabase shows starts with <code>postgresql://</code>. SQLAlchemy's async engine needs <code>postgresql+asyncpg://</code>. Rewrite the prefix in <code>config.py</code> so nobody has to remember, and strip any <code>?sslmode=</code> query parameter — asyncpg rejects it. Pass <code>ssl</code> via <code>connect_args</code> instead.</div>
+
+<h4>App entrypoint</h4>
+<pre class="code"><span class="c"># app/main.py</span>
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.config import settings
+from app.bot.client import start_bot, stop_bot
+from app.jobs.scheduler import start_jobs
+from app.features import scheduling, resources, finance
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    bot_task = await start_bot()      <span class="c"># discord.py as an asyncio task</span>
+    start_jobs()                      <span class="c"># APScheduler</span>
+    yield
+    await stop_bot(bot_task)
+
+app = FastAPI(title="SyncUp API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,   <span class="c"># localhost + *.vercel.app + prod domain</span>
+    allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
+)
+
+app.include_router(scheduling.router, prefix="/api/scheduling", tags=["scheduling"])
+app.include_router(resources.router,  prefix="/api/resources",  tags=["resources"])
+app.include_router(finance.router,    prefix="/api/finance",    tags=["finance"])
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}</pre>
+
+<h2 id="s12">12. Frontend Setup</h2>
+<pre class="code">cd syncup/web
+npm install
+cp .env.example .env.local     <span class="c"># VITE_API_BASE_URL=http://localhost:8000</span>
+npm run dev                    <span class="c"># → http://localhost:5173</span></pre>
+<pre class="code"><span class="c">// src/api/client.ts</span>
+import axios from "axios";
+
+export const api = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+  headers: { "Content-Type": "application/json" },
+});</pre>
+<div class="note">Every browser-exposed Vite variable must be prefixed <code>VITE_</code>, and it is baked in at <em>build</em> time — changing it on Vercel requires a redeploy, not just a restart. Never put a secret in one; anything with the <code>VITE_</code> prefix ships to the user's browser.</div>
+<p>Keep the frontend deliberately thin. It is a dashboard for the judges to look at; the Discord bot is where the demo actually happens. Three pages, no state management library, no component kit beyond something like Tailwind. If the frontend is eating hours, cut a page rather than cutting bot polish.</p>
+
+<h2 id="s13">13. Microsoft Foundry Setup</h2>
+<p>Create a Foundry project, deploy a small chat model (<code>gpt-4o-mini</code> or equivalent), and copy the endpoint URL and key from the project's overview page.</p>
+<div class="warn">Read the endpoint and model name from your own Foundry project page rather than hardcoding a URL from a tutorial — endpoint hostnames differ by resource and region. Also note that the older <code>azure-ai-inference</code> beta SDK is deprecated and being retired; the current guidance is to use the standard <strong>OpenAI SDK pointed at your Foundry endpoint</strong>, which is what the code below does. It also means you can swap to any OpenAI-compatible provider in one line if the free quota runs out mid-hackathon.</div>
+<pre class="code"><span class="c"># app/core/llm.py</span>
+import json
+from openai import AsyncOpenAI
+from pydantic import BaseModel
+from app.config import settings
+
+client = AsyncOpenAI(
+    base_url=settings.foundry_endpoint,   <span class="c"># from your Foundry project</span>
+    api_key=settings.foundry_api_key,
+)
+
+async def complete_json[T: BaseModel](
+    system: str, user: str, schema: type[T], *, retries: int = 2
+) -&gt; T:
+    """Call the model and validate against a Pydantic schema.
+    Retries on malformed output, then raises. Never patches bad JSON."""
+    for attempt in range(retries + 1):
+        resp = await client.chat.completions.create(
+            model=settings.foundry_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2,        <span class="c"># low: we want consistency, not creativity</span>
+        )
+        try:
+            return schema.model_validate_json(resp.choices[0].message.content)
+        except Exception:
+            if attempt == retries:
+                raise
+</pre>
+
+<h4>Prompt discipline</h4>
+<ul>
+<li><strong>Always request JSON against a Pydantic schema.</strong> Free-text parsing will break at hour 20.</li>
+<li><strong>Low temperature (0.1–0.3).</strong> You want the same answer twice on stage.</li>
+<li><strong>Inject real context</strong> — the org's inventory, its historical prices. Grounding beats prompt-engineering.</li>
+<li><strong>Log everything</strong> to <code>ai_interactions</code>: prompt, tool calls, latency, tokens. When a judge asks how you know the AI is right, you open the dashboard.</li>
+<li><strong>Cache aggressively during development.</strong> A dict keyed on the prompt hash saves your free quota and makes iteration instant.</li>
+</ul>
+
+<h2 id="s14">14. Discord Bot Setup</h2>
+<ol>
+<li><a href="https://discord.com/developers/applications">Discord Developer Portal</a> → New Application → Bot → Reset Token, copy it.</li>
+<li>Enable <strong>Message Content Intent</strong> under Privileged Gateway Intents if you want <code>@SyncUp</code> mentions as well as slash commands.</li>
+<li>OAuth2 → URL Generator → scopes <code>bot</code> + <code>applications.commands</code>; permissions: Send Messages, Embed Links, Use Slash Commands, Read Message History.</li>
+<li>Open the generated URL and add the bot to your test server.</li>
+</ol>
+<pre class="code"><span class="c"># app/bot/client.py</span>
+import asyncio, discord
+from discord import app_commands
+from app.config import settings
+
+intents = discord.Intents.default()
+intents.message_content = True
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
+
+@bot.event
+async def on_ready():
+    <span class="c"># Guild-scoped sync is instant; global sync can take up to an hour.</span>
+    guild = discord.Object(id=settings.discord_guild_id)
+    tree.copy_global_to(guild=guild)
+    await tree.sync(guild=guild)
+    print(f"SyncUp online as {bot.user}")
+
+async def start_bot():
+    return asyncio.create_task(bot.start(settings.discord_bot_token))
+
+async def stop_bot(task):
+    await bot.close()
+    task.cancel()</pre>
+<div class="warn"><strong>Always sync commands to your test guild, never globally, during the hackathon.</strong> Global command propagation can take up to an hour — long enough to convince you the bot is broken when it is merely slow.</div>
+<p>Interaction pattern: acknowledge immediately with <code>await interaction.response.defer(thinking=True)</code>, then <code>followup.send(...)</code> once the agent returns. Discord kills an un-acknowledged interaction after 3 seconds, and an LLM round trip is slower than that.</p>
+
+<h2 id="s15">15. Environment Variables</h2>
+<h4>api/.env</h4>
+<pre class="code"><span class="c"># --- Database (Supabase session pooler, NOT the direct connection) ---</span>
+DATABASE_URL=postgresql+asyncpg://postgres.&lt;ref&gt;:&lt;password&gt;@aws-0-&lt;region&gt;.pooler.supabase.com:5432/postgres
+
+<span class="c"># --- Microsoft Foundry ---</span>
+FOUNDRY_ENDPOINT=https://&lt;your-project&gt;.services.ai.azure.com/...
+FOUNDRY_API_KEY=&lt;key&gt;
+FOUNDRY_MODEL=gpt-4o-mini
+
+<span class="c"># --- Discord ---</span>
+DISCORD_BOT_TOKEN=&lt;token&gt;
+DISCORD_GUILD_ID=&lt;test server id&gt;
+DISCORD_ANNOUNCE_CHANNEL_ID=&lt;#events channel id&gt;
+
+<span class="c"># --- App ---</span>
+ENVIRONMENT=development
+CORS_ORIGINS=http://localhost:5173,https://syncup.vercel.app
+API_KEY=&lt;shared secret for dashboard calls&gt;
+SQL_ECHO=false</pre>
+<h4>web/.env.local</h4>
+<pre class="code">VITE_API_BASE_URL=http://localhost:8000</pre>
+<table>
+<tr><th>Variable</th><th>Where it lives in production</th><th>Notes</th></tr>
+<tr><td><code>DATABASE_URL</code></td><td>Render → Environment</td><td>Pooler host. Rewrite prefix to <code>+asyncpg</code></td></tr>
+<tr><td><code>FOUNDRY_*</code></td><td>Render → Environment</td><td>Never commit; rotate if leaked</td></tr>
+<tr><td><code>DISCORD_BOT_TOKEN</code></td><td>Render → Environment</td><td>Discord auto-revokes tokens pushed to public GitHub</td></tr>
+<tr><td><code>CORS_ORIGINS</code></td><td>Render → Environment</td><td>Must include the exact Vercel URL, no trailing slash</td></tr>
+<tr><td><code>VITE_API_BASE_URL</code></td><td>Vercel → Environment Variables</td><td>Build-time — redeploy after changing</td></tr>
+</table>
+<p><code>.env</code> is gitignored from commit one. Commit a <code>.env.example</code> with every key present and all values blank, so a teammate can diff against it when something is missing.</p>
+
+<h2 id="s16">16. Deployment</h2>
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  GH["GitHub main branch"] -->|auto deploy| RND["Render<br/>FastAPI + Discord bot"]
+  GH -->|auto deploy| VC["Vercel<br/>React SPA"]
+  RND -->|session pooler| SB[("Supabase<br/>PostgreSQL")]
+  VC -->|HTTPS| RND
+  RND -->|WebSocket| DSC["Discord Gateway"]
+  RND -->|HTTPS| MF["Microsoft Foundry"]
+</pre>
+</div>
+
+<h3>Backend → Render</h3>
+<p>New → Web Service → connect the repo → root directory <code>api</code>.</p>
+<table>
+<tr><th>Setting</th><th>Value</th></tr>
+<tr><td>Runtime</td><td>Python 3</td></tr>
+<tr><td>Build command</td><td><code>pip install -e . &amp;&amp; alembic upgrade head</code></td></tr>
+<tr><td>Start command</td><td><code>uvicorn app.main:app --host 0.0.0.0 --port $PORT</code></td></tr>
+<tr><td>Instance type</td><td>Free</td></tr>
+<tr><td>Health check path</td><td><code>/health</code></td></tr>
+<tr><td>Auto-deploy</td><td>On, from <code>main</code></td></tr>
+</table>
+<p>Bind to <code>$PORT</code> — Render injects it and a hardcoded port fails the health check. Running migrations in the build command keeps schema and code in lockstep on every deploy.</p>
+
+<div class="warn"><strong>The single biggest demo risk in this stack.</strong> A Render free web service spins down after <strong>15 minutes</strong> without inbound traffic, and cold start takes roughly <strong>30–60 seconds</strong>. If your service naps while you walk to the stage, your first <code>/plan</code> command times out in front of the judges.
+<br><br><strong>Mitigations, in order:</strong>
+<br>1. Set up an external uptime pinger (UptimeRobot, cron-job.org, or a GitHub Action on a schedule) hitting <code>/health</code> every 10 minutes from the moment you first deploy.
+<br>2. Hit the endpoint yourself 2–3 minutes before you present, and confirm it responds.
+<br>3. Note that free services also have an ephemeral filesystem — never write uploads or a SQLite file to local disk; everything durable goes to Supabase.</div>
+
+<h4>render.yaml (optional, keeps config in the repo)</h4>
+<pre class="code">services:
+  - type: web
+    name: syncup-api
+    runtime: python
+    rootDir: api
+    plan: free
+    buildCommand: "pip install -e . &amp;&amp; alembic upgrade head"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false          <span class="c"># set in dashboard, never in git</span>
+      - key: FOUNDRY_API_KEY
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false</pre>
+
+<h3>Frontend → Vercel</h3>
+<p>New Project → import the repo → <strong>Root Directory: <code>web</code></strong>.</p>
+<table>
+<tr><th>Setting</th><th>Value</th></tr>
+<tr><td>Framework preset</td><td>Vite</td></tr>
+<tr><td>Build command</td><td><code>npm run build</code></td></tr>
+<tr><td>Output directory</td><td><code>dist</code></td></tr>
+<tr><td>Env var</td><td><code>VITE_API_BASE_URL</code> = your Render URL</td></tr>
+</table>
+<p>Add <code>vercel.json</code> so client-side routes survive a hard refresh — without it, loading <code>/budget</code> directly returns a 404:</p>
+<pre class="code">{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }</pre>
+<p>After the first Vercel deploy, copy the assigned URL into <code>CORS_ORIGINS</code> on Render and redeploy the backend. Preview deployments get unique URLs per branch, so either add a regex origin or just test the dashboard against production.</p>
+
+<h3>Database → Supabase</h3>
+<p>Migrations run automatically via the Render build command. To apply one manually:</p>
+<pre class="code">cd api
+DATABASE_URL="&lt;prod pooler url&gt;" alembic upgrade head</pre>
+<p>Supabase's dashboard gives you a SQL editor and a table browser — useful for showing judges real rows, and for the 3am moment when you need to check what actually got written.</p>
+
+<h3>Deployment order at hour 0</h3>
+<ol>
+<li>Supabase projects created, extensions enabled</li>
+<li>Repo scaffolded, <code>/health</code> returns 200 locally</li>
+<li>Render service live, <code>/health</code> returns 200 in production</li>
+<li>Vercel deployed, dashboard loads and calls <code>/health</code> successfully</li>
+<li>Uptime pinger configured</li>
+</ol>
+<p>Do all five in the first two hours, while everything is trivial to debug. Teams that leave deployment to hour 20 lose the demo, not the build.</p>
+
+<h2 id="s17">17. Git Workflow &amp; Conventions</h2>
+<table>
+<tr><th>Rule</th><th>Detail</th></tr>
+<tr><td>Branches</td><td><code>feat/scheduling-scoring</code>, <code>feat/resource-holds</code>, <code>feat/budget-builder</code></td></tr>
+<tr><td>Merge to main</td><td>Small and often — at least every 3 hours. Long-lived branches are how 24-hour teams lose 4 hours to a merge</td></tr>
+<tr><td>No PR reviews</td><td>Merge directly. You do not have time; ownership boundaries are the safety net</td></tr>
+<tr><td>Migrations</td><td>One numbered file per member. Never edit someone else's</td></tr>
+<tr><td>Commits</td><td><code>feat(scheduling): weighted slot scoring</code> — the prefix makes the final README write itself</td></tr>
+<tr><td>Formatting</td><td><code>ruff format</code> on save. Zero time on style debates</td></tr>
+</table>
+<div class="note"><strong>Sync every three hours, out loud, for two minutes.</strong> What's merged, what's blocked, what changed in a shared contract. Three people in one codebase drift silently otherwise, and the drift only surfaces at integration time when you have no hours left to absorb it.</div>
+
+<h2 id="s18">18. Integration Contracts</h2>
+<p>These are the only things all three of you must agree on. Write them down in hour one; changing them after hour 12 costs everyone.</p>
+<table>
+<tr><th>Contract</th><th>Owner</th><th>Definition</th></tr>
+<tr><td>Core DB tables</td><td>A</td><td>Migration <code>0001_core</code>, merged by hour 2</td></tr>
+<tr><td><code>EventConfirmed</code></td><td>A</td><td>Payload in <code>app/core/events.py</code>. B subscribes</td></tr>
+<tr><td><code>ResourcesConfirmed</code></td><td>B</td><td>Payload in <code>app/core/events.py</code>. C subscribes</td></tr>
+<tr><td>API prefix</td><td>A</td><td><code>/api/&lt;feature&gt;/...</code>, JSON, snake_case fields</td></tr>
+<tr><td>Error shape</td><td>A</td><td><code>{"detail": str, "code": str}</code> — one shape everywhere</td></tr>
+<tr><td>Datetimes</td><td>A</td><td>ISO-8601 UTC with <code>Z</code> on the wire. Localise only in the UI</td></tr>
+<tr><td>Money</td><td>C</td><td>Strings on the wire (<code>"287.50"</code>), <code>Decimal</code> in Python. Never a JSON float</td></tr>
+<tr><td>Embed style</td><td>B</td><td>Shared builders in <code>bot/embeds.py</code> so all three features look like one product</td></tr>
+</table>
+
+<h2 id="s19">19. Demo Runbook</h2>
+<p>Rehearse the full path twice before you present. Not the code — the <em>performance</em>.</p>
+<table>
+<tr><th>#</th><th>Action</th><th>What the judges should notice</th></tr>
+<tr><td>1</td><td>Show the Discord server — a real one, with members</td><td>No new app to install. This is where clubs already are</td></tr>
+<tr><td>2</td><td><code>/plan 100-person orientation night next Thursday-ish, budget $300</code></td><td>Plain English, not a form</td></tr>
+<tr><td>3</td><td>Three ranked slots appear with attendance percentages</td><td>It ranks trade-offs; it doesn't just find gaps</td></tr>
+<tr><td>4</td><td>Point at the second option: "9 of 12, but the treasurer is missing"</td><td>It knows who matters, not just how many</td></tr>
+<tr><td>5</td><td>Approve → packing list appears with the projector conflict flagged</td><td>The same conflict engine, now on equipment</td></tr>
+<tr><td>6</td><td>Approve list → itemised $287 budget, $140 remaining this semester</td><td>Three domains, one conversation</td></tr>
+<tr><td>7</td><td>Switch to the dashboard: burn-down chart</td><td>There is a real system behind the bot</td></tr>
+<tr><td>8</td><td>Close on the one-liner: "a chief of staff for student clubs"</td><td>Leave them the sentence, not the feature list</td></tr>
+</table>
+<h4>Pre-demo checklist — 10 minutes before</h4>
+<ul>
+<li>Hit <code>/health</code> on Render; confirm a fast response (service is awake)</li>
+<li>Reseed the demo database to a known state</li>
+<li>Confirm the Chess Club projector booking exists — this is what makes step 5 fire</li>
+<li>Confirm the semester budget is set so step 6 lands near the warning threshold</li>
+<li>Bot shows online in the server member list</li>
+<li>Dashboard open in a second browser tab, already loaded</li>
+<li>Phone hotspot ready in case venue wifi fails</li>
+</ul>
+<div class="note"><strong>Record a 90-second screen capture of the working flow at hour 20.</strong> If anything breaks live, you show the video and keep talking. Every experienced hackathon team does this; most first-time teams learn to the hard way.</div>
+
+<h2 id="s20">20. Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Connection timeout to Supabase from Render</td><td>Using the direct connection string, which is IPv6-only on the free plan</td><td>Switch to the Shared Pooler (Supavisor) host</td></tr>
+<tr><td><code>InvalidCatalogName</code> / auth failure</td><td>Pooler username must be <code>postgres.&lt;project-ref&gt;</code>, not <code>postgres</code></td><td>Copy the URI from the dashboard verbatim</td></tr>
+<tr><td><code>sslmode is not a valid keyword</code></td><td>asyncpg rejects libpq query params</td><td>Strip <code>?sslmode=require</code>; pass SSL in <code>connect_args</code></td></tr>
+<tr><td>First request after a break hangs ~1 min</td><td>Render free tier cold start</td><td>Expected. Uptime pinger every 10 min</td></tr>
+<tr><td>Slash commands do not appear</td><td>Synced globally instead of to the guild</td><td>Guild-scoped <code>tree.sync(guild=...)</code></td></tr>
+<tr><td>"The application did not respond"</td><td>Agent took longer than Discord's 3-second limit</td><td><code>defer(thinking=True)</code> then <code>followup.send()</code></td></tr>
+<tr><td>CORS error in the dashboard</td><td>Vercel URL missing from <code>CORS_ORIGINS</code>, or trailing slash</td><td>Exact origin, no trailing slash, redeploy backend</td></tr>
+<tr><td>Frontend still calls localhost in production</td><td><code>VITE_</code> vars are baked at build time</td><td>Set it in Vercel, then redeploy</td></tr>
+<tr><td>Budget totals off by a cent</td><td>Float arithmetic somewhere in the chain</td><td><code>Decimal</code> end to end; <code>NUMERIC(12,2)</code> in the DB</td></tr>
+<tr><td>Exclusion constraint error on insert</td><td>Working as designed — a real double-book was blocked</td><td>Catch <code>IntegrityError</code>, return a friendly conflict message</td></tr>
+<tr><td>LLM returns unparseable JSON</td><td>Temperature too high, or schema not in the prompt</td><td>Lower to 0.2, restate the schema, keep the retry loop</td></tr>
+<tr><td>Alembic: "target database is not up to date"</td><td>Two members generated migrations from the same parent</td><td>Rebase one revision's <code>down_revision</code>; do not merge heads under time pressure</td></tr>
+</table>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad:true, theme:'base', securityLevel:'loose',
+  themeVariables:{
+    primaryColor:'#FDECEE', primaryTextColor:'#1A1A2E', primaryBorderColor:'#C8102E',
+    lineColor:'#8A8A9A', secondaryColor:'#F5F5F7', tertiaryColor:'#FAFAFB',
+    fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Inter,sans-serif', fontSize:'14px'
+  },
+  flowchart:{ curve:'basis', padding:14 },
+  sequence:{ actorMargin:44, boxMargin:8 }
+});
+</script>

@@ -1,0 +1,323 @@
+<meta charset="utf-8">
+<title>SyncUp — Financial Planning Module Flow</title>
+<style>
+  :root { --accent:#C8102E; --dark:#1A1A2E; --gray:#5A5A6E; --line:#E3E3E8; --bg:#FFFFFF; --soft:#FAFAFB; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; color:var(--dark);
+         background:var(--bg); margin:0; padding:48px 40px 90px; line-height:1.65; max-width:1100px; margin-inline:auto; }
+  h1 { font-size:38px; margin:0 0 6px; color:var(--accent); letter-spacing:-.02em; }
+  .sub { font-size:19px; color:var(--dark); margin:0 0 6px; }
+  .meta { font-size:13px; color:var(--gray); padding-bottom:18px; border-bottom:3px solid var(--accent); margin-bottom:36px; }
+  h2 { font-size:24px; margin:46px 0 8px; color:var(--accent); }
+  h3 { font-size:17px; margin:28px 0 6px; color:var(--dark); }
+  p, li { font-size:15px; }
+  code { background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:13px; }
+  pre.code { background:#1A1A2E; color:#E8E8EE; border-radius:8px; padding:16px 18px; overflow-x:auto;
+             font-size:12.5px; line-height:1.55; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre.code .c { color:#8A93A8; }
+  table { border-collapse:collapse; width:100%; margin:14px 0 6px; font-size:14px; }
+  th { background:var(--accent); color:#fff; text-align:left; padding:9px 11px; font-weight:600; }
+  td { border-bottom:1px solid var(--line); padding:9px 11px; vertical-align:top; }
+  tr:nth-child(even) td { background:var(--soft); }
+  .diagram { border:1px solid var(--line); border-radius:12px; padding:20px; margin:18px 0; background:#fff; overflow-x:auto; }
+  .note { border-left:4px solid var(--accent); background:var(--soft); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .warn { border-left:4px solid #B8860B; background:#FFFBEB; padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .owner { display:inline-block; background:var(--accent); color:#fff; font-size:12px; font-weight:600;
+           padding:4px 12px; border-radius:99px; letter-spacing:.03em; }
+</style>
+
+<h1>Financial Planning Module</h1>
+<p class="sub">SyncUp — AI Operations Manager for Student Organizations</p>
+<p class="meta"><span class="owner">MEMBER C</span> &nbsp; Module 3 of 3 &nbsp;·&nbsp; <code>api/app/features/finance/</code> &nbsp;·&nbsp; Monolith: FastAPI · React · Supabase Postgres · Microsoft Foundry</p>
+
+<div class="note"><strong>Architecture note.</strong> SyncUp is a <strong>single FastAPI process</strong>. Your module is a Python package that scheduling <em>imports and calls directly</em>, sharing the same <code>AsyncSession</code> and the same transaction. There is no HTTP call and no eventual consistency between modules — which matters more here than anywhere else, because money must never be committed against an event that failed to save.</div>
+
+<h2>1. Module Scope</h2>
+<p>Financial planning drafts an itemized budget from an event description, checks it against the org's remaining semester allocation, tracks actual expenses against estimates, and warns before the org overspends. It closes the loop: scheduling picks the time, resources decide what is needed, finance decides whether the org can afford it.</p>
+<div class="warn"><strong>Money rule:</strong> all amounts are <code>NUMERIC(12,2)</code> in PostgreSQL and <code>Decimal</code> in Python — never <code>float</code>, and never a JSON float on the wire (serialize as strings). The LLM proposes numbers; Python performs every arithmetic operation. A budget whose column does not add up is the single most damaging thing a judge can notice.</div>
+
+<h3>Files you own</h3>
+<pre class="code">api/app/features/finance/
+├── __init__.py
+├── router.py          <span class="c"># FastAPI routes only</span>
+├── schemas.py         <span class="c"># Pydantic + LLM output schemas</span>
+├── service.py         <span class="c"># business logic; exposes draft_for_event() to scheduling</span>
+├── headroom.py        <span class="c"># PURE budget math — no I/O, unit tested</span>
+└── agent.py           <span class="c"># LLM budget drafting + cut suggestions</span>
+
+api/app/models/finance.py   <span class="c"># budgets, event_budgets, budget_line_items, expenses</span>
+api/app/bot/commands/budget.py</pre>
+
+<h3>Also yours: the React shell</h3>
+<p>Routing, layout, the axios client, and the Vercel deploy. A and B write only their own page components against your shell. Ship it in the first four hours so they are never blocked on frontend scaffolding.</p>
+
+<h2>2. Module Placement Inside the Monolith</h2>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  subgraph PROC["Single FastAPI process — Render web service"]
+    direction TB
+    SCH["features/scheduling/service.py"]
+    RT["finance/router.py<br/>/api/finance/*"]
+    BOTC["bot/commands/budget.py"]
+    SVC["finance/service.py<br/>draft_for_event, approve, log_expense"]
+    AGT["finance/agent.py<br/>LLM line-item drafting"]
+    HR["headroom.py<br/>pure Decimal math"]
+    PR["price priors<br/>SQL over past line items"]
+
+    SCH -->|"direct call<br/>same session"| SVC
+    RT --> SVC
+    BOTC --> SVC
+    SVC --> PR
+    PR --> AGT
+    SVC --> AGT
+    SVC --> HR
+  end
+
+  UI["React dashboard<br/>Vercel"] -->|HTTPS| RT
+  AGT --> MF["Microsoft Foundry"]
+  SVC --> DB[("Supabase Postgres<br/>NUMERIC 12,2")]
+</pre>
+</div>
+
+<h2>3. End-to-End Sequence — “Can we afford this?”</h2>
+<p>Participants are <em>modules in one process</em>. Solid arrows are function calls.</p>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as Organizer
+  participant SCH as scheduling/service.py
+  participant SVC as finance/service.py
+  participant PR as price priors
+  participant AGT as finance/agent.py
+  participant MF as Microsoft Foundry
+  participant HR as headroom.py
+  participant DB as AsyncSession
+
+  Note over SCH,SVC: Called inside the confirm transaction,<br/>after resources returns unowned_items.
+  SCH->>SVC: draft_for_event(db, event, reservation_plan)
+
+  SVC->>PR: historical_unit_cost per category
+  PR->>DB: AVG(unit_cost) FROM budget_line_items<br/>WHERE org_id AND category, last 12 months
+  PR-->>SVC: priors, or NULL if no history
+
+  SVC->>AGT: draft_lines(event, unowned_items, priors, cap)
+  AGT->>MF: chat completion, JSON schema
+  MF-->>AGT: line item list
+  AGT->>AGT: Pydantic validate, reject bad rows
+  AGT-->>SVC: LineItem list
+
+  SVC->>SVC: Decimal math: line_total, subtotal,<br/>contingency 10%, estimated_total
+  Note over SVC: The model never computes a total.
+  SVC->>DB: INSERT event_budgets status=draft + line items
+
+  SVC->>DB: SELECT allocated, committed, actual for semester
+  SVC->>HR: check(allocated, committed, actual, proposed)
+  HR-->>SVC: OK, TIGHT or OVER
+
+  alt OVER
+    SVC->>AGT: suggest_cuts(lines, overage)
+    AGT->>MF: chat completion
+    MF-->>AGT: "drop catering upgrade, saves $60"
+  end
+
+  SVC-->>SCH: BudgetDraft + verdict + suggested cuts
+  SCH-->>U: single combined embed via the bot
+
+  U->>SVC: approve, POST /api/finance/budgets/{id}/approve
+  SVC->>DB: UPDATE status=approved
+
+  Note over U,DB: Later, after the event
+  U->>SVC: /expense 42.50 "pizza receipt"
+  SVC->>DB: INSERT expenses, match to line item
+  SVC-->>U: variance vs estimate, updated burn-down
+</pre>
+</div>
+
+<h2>4. Budget Generation Logic</h2>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+  A["Event: title, attendance, cap<br/>+ unowned items from resources"] --> B["Fetch historical priors<br/>AVG unit_cost per category"]
+  B --> C{"History exists?"}
+  C -- yes --> D["Inject priors into prompt<br/>anchors model to real org prices"]
+  C -- no --> E["Use seeded category defaults"]
+  D --> F["LLM drafts line items<br/>JSON schema, Pydantic validated"]
+  E --> F
+  F --> G["Reject invalid rows:<br/>negative qty, unknown category"]
+  G --> H["Python Decimal math<br/>line_total = unit_cost * quantity"]
+  H --> I["subtotal = sum of line totals"]
+  I --> J["contingency = subtotal * 0.10"]
+  J --> K["estimated_total = subtotal + contingency"]
+  K --> L{"estimated_total within cap?"}
+  L -- yes --> M["Draft ready"]
+  L -- no --> N["Flag over-cap<br/>LLM ranks cuts by dispensability"]
+  N --> M
+  M --> O["Persist event_budgets + line items"]
+</pre>
+</div>
+
+<h3>Standard categories</h3>
+<table>
+<tr><th>Category</th><th>Typical lines</th><th>Fed from</th></tr>
+<tr><td><code>food</code></td><td>Catering, pizza, drinks — scales with attendance</td><td>LLM + attendance</td></tr>
+<tr><td><code>venue</code></td><td>Room hire, deposit, cleaning fee</td><td><code>ReservationPlan.venue_cost</code></td></tr>
+<tr><td><code>equipment_rental</code></td><td>Items the org does not own</td><td><code>ReservationPlan.unowned_items</code></td></tr>
+<tr><td><code>printing</code></td><td>Posters, flyers, name tags</td><td>LLM + attendance</td></tr>
+<tr><td><code>materials</code></td><td>Decorations, supplies, prizes</td><td>LLM</td></tr>
+<tr><td><code>transport</code></td><td>Van hire, delivery fees</td><td>LLM</td></tr>
+<tr><td><code>contingency</code></td><td>Flat 10% of subtotal</td><td>Computed in Python</td></tr>
+</table>
+<p>Two of these arrive as structured data from Member B rather than being invented by the model. That is the monolith paying off: you receive typed Python objects in the same call, not a JSON payload you have to re-parse and trust.</p>
+
+<h2>5. Headroom Model</h2>
+<p>Three distinct numbers — conflating them is the classic bug in budget software.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  A["allocated<br/>semester budget"] --> D["remaining"]
+  B["committed<br/>approved, not yet spent"] --> D
+  C["actual<br/>logged expenses"] --> D
+  D --> E{"remaining minus proposed"}
+  E -- "zero or above" --> F["verdict OK"]
+  E -- "down to -10% of allocation" --> G["verdict TIGHT<br/>warn, still allow"]
+  E -- "worse than -10%" --> H["verdict OVER<br/>block, require cuts"]
+</pre>
+</div>
+<pre class="code"><span class="c"># app/features/finance/headroom.py — pure, no I/O</span>
+from decimal import Decimal
+
+def check(allocated: Decimal, committed: Decimal,
+          actual: Decimal, proposed: Decimal) -&gt; Headroom:
+    remaining = allocated - committed - actual
+    after     = remaining - proposed
+    if after &gt;= 0:
+        verdict = "OK"
+    elif after &gt;= -(allocated * Decimal("0.10")):
+        verdict = "TIGHT"
+    else:
+        verdict = "OVER"
+    return Headroom(remaining=remaining, after=after, verdict=verdict)
+
+<span class="c"># committed = SUM(estimated_total) WHERE status='approved'</span>
+<span class="c">#             AND event.status IN ('draft','confirmed')</span>
+<span class="c"># actual    = SUM(expenses.amount) WHERE status IN ('approved','reimbursed')</span>
+<span class="c"># Once an event completes, committed is replaced by actual — no double count.</span></pre>
+
+<h2>6. State Machines</h2>
+<div class="diagram">
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> draft: LLM generated
+  draft --> draft: organizer edits lines
+  draft --> approved: within headroom and approved
+  draft --> rejected: over budget, no cuts made
+  approved --> reconciling: event completed
+  reconciling --> closed: all expenses logged
+  approved --> cancelled: event cancelled, funds released
+  closed --> [*]
+  rejected --> [*]
+  cancelled --> [*]
+</pre>
+</div>
+<div class="diagram">
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> pending: member logs expense
+  pending --> approved: treasurer approves
+  pending --> disputed: mismatch with estimate
+  disputed --> approved: resolved
+  disputed --> rejected
+  approved --> reimbursed: paid back to member
+  reimbursed --> [*]
+  rejected --> [*]
+</pre>
+</div>
+
+<h2>7. Interface Exposed to Scheduling</h2>
+<p>This function is your contract with Member A. Agree on the signature in hour one.</p>
+<pre class="code"><span class="c"># app/features/finance/service.py — public interface</span>
+
+async def draft_for_event(
+    db: AsyncSession,
+    event: Event,
+    plan: ReservationPlan,        <span class="c"># typed object from resources — not JSON</span>
+) -&gt; BudgetDraft:
+    """Called by scheduling inside the confirm transaction.
+    Prices lines, checks headroom, persists a draft budget.
+    MUST NOT commit — participates in the caller's transaction."""
+
+async def approve(db: AsyncSession, budget_id: UUID,
+                  actor_id: UUID) -&gt; EventBudget: ...
+
+async def log_expense(db: AsyncSession, budget_id: UUID,
+                      amount: Decimal, description: str,
+                      member_id: UUID) -&gt; Expense: ...</pre>
+<div class="warn"><strong>Never call <code>db.commit()</code> inside <code>draft_for_event()</code>.</strong> Scheduling owns the transaction. If you commit early and a later step fails, you have a budget committed against an event that does not exist — the exact class of bug the monolith exists to prevent. Your functions receive a session and use it; they never manage its lifecycle.</div>
+<p><strong>Import direction:</strong> scheduling imports finance. Finance must never import scheduling — receive the <code>Event</code> as an argument. Shared types belong in <code>app/core/types.py</code>.</p>
+
+<h2>8. API Surface</h2>
+<p>Mounted under <code>/api/finance</code>. These serve the dashboard and manual bot commands; the main flow arrives via <code>draft_for_event()</code>.</p>
+<table>
+<tr><th>Method &amp; path</th><th>Purpose</th><th>Key response fields</th></tr>
+<tr><td><code>GET /events/{id}/budget</code></td><td>Fetch draft or approved budget</td><td><code>status</code>, <code>lines[]</code>, <code>variance</code></td></tr>
+<tr><td><code>POST /events/{id}/budget/regenerate</code></td><td>Re-run LLM drafting</td><td><code>line_items[]</code>, <code>verdict</code></td></tr>
+<tr><td><code>PATCH /budgets/{id}/lines/{line_id}</code></td><td>Manual edit of a line</td><td>recomputed <code>estimated_total</code></td></tr>
+<tr><td><code>POST /budgets/{id}/approve</code></td><td>Commit funds against the allocation</td><td><code>status</code></td></tr>
+<tr><td><code>POST /budgets/{id}/expenses</code></td><td>Log an actual expense</td><td><code>expense_id</code>, <code>variance</code></td></tr>
+<tr><td><code>GET /headroom?org_id=&amp;semester=</code></td><td>Allocated / committed / actual / remaining</td><td><code>verdict</code>, <code>remaining</code></td></tr>
+<tr><td><code>GET /burndown?org_id=&amp;semester=</code></td><td>Time series for the chart</td><td><code>points[]</code> cumulative spend</td></tr>
+<tr><td><code>GET /variance?org_id=</code></td><td>Estimate vs actual per event and category</td><td><code>rows[]</code></td></tr>
+</table>
+<p>Serialize all money fields as strings (<code>"287.50"</code>), never JSON floats. Parse them back to <code>Decimal</code> in Python and format with <code>Intl.NumberFormat</code> in React.</p>
+
+<h2>9. Tables Owned</h2>
+<table>
+<tr><th>Table</th><th>Access</th></tr>
+<tr><td><code>budgets</code></td><td>Finance exclusive — semester allocation per org</td></tr>
+<tr><td><code>event_budgets</code></td><td>Finance exclusive</td></tr>
+<tr><td><code>budget_line_items</code></td><td>Finance exclusive</td></tr>
+<tr><td><code>expenses</code></td><td>Finance exclusive</td></tr>
+<tr><td><code>events</code>, <code>packing_list_items</code></td><td>Read-only — owned by A and B</td></tr>
+</table>
+<p>Your migration is <code>0003_finance</code>, branched from B's <code>0002_resources</code>. Never edit another member's migration file.</p>
+
+<h2>10. React Dashboard Views</h2>
+<table>
+<tr><th>View</th><th>Contents</th></tr>
+<tr><td>Semester burn-down</td><td>Allocated ceiling, cumulative committed, cumulative actual, projected end-of-semester</td></tr>
+<tr><td>Budget detail</td><td>Editable line-item table with AI-suggested badges, live total recalculation</td></tr>
+<tr><td>Variance report</td><td>Estimate vs actual by category, largest overrun first — proves estimates improve over time</td></tr>
+<tr><td>Headroom banner</td><td>Persistent top strip: remaining balance, colour-coded OK / TIGHT / OVER</td></tr>
+</table>
+
+<h2>11. Build Checklist — 24 Hours</h2>
+<table>
+<tr><th>Hours</th><th>Deliverable</th><th>Definition of done</th></tr>
+<tr><td>0–4</td><td>React shell: routing, layout, axios client, Vercel deploy</td><td>A and B can add pages; dashboard calls <code>/health</code> in prod</td></tr>
+<tr><td>4–7</td><td><code>0003_finance</code> migration with <code>NUMERIC(12,2)</code></td><td>Decimal round-trips through the ORM without drift</td></tr>
+<tr><td>7–10</td><td>Seed: semester allocation + 4 past events with real spend</td><td>Burn-down has believable history; priors exist</td></tr>
+<tr><td>10–13</td><td><code>headroom.py</code> + unit tests</td><td>OK / TIGHT / OVER boundaries covered</td></tr>
+<tr><td>13–17</td><td><code>draft_for_event()</code> exposed to scheduling</td><td>A calls it; nothing commits inside it</td></tr>
+<tr><td>17–20</td><td>Approve endpoint + expense logging</td><td>Committed funds correctly reduce remaining</td></tr>
+<tr><td>20–22</td><td>Burn-down chart in React</td><td>Renders live from the API</td></tr>
+<tr><td>22–24</td><td>Integration + demo rehearsal</td><td>Full three-module flow runs end to end</td></tr>
+</table>
+<div class="note"><strong>Demo tip:</strong> the strongest financial moment is not the budget appearing — it is the <em>warning</em>. Seed the semester allocation so one specific demo event pushes the org into TIGHT territory, and let the agent propose the cut on stage. That interaction is what makes it look like a chief of staff rather than a calculator.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad:true, theme:'base', securityLevel:'loose',
+  themeVariables:{
+    primaryColor:'#FDECEE', primaryTextColor:'#1A1A2E', primaryBorderColor:'#C8102E',
+    lineColor:'#8A8A9A', secondaryColor:'#F5F5F7', tertiaryColor:'#FAFAFB',
+    fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Inter,sans-serif', fontSize:'14px'
+  },
+  flowchart:{ curve:'basis', padding:14 },
+  sequence:{ actorMargin:40, boxMargin:8 }
+});
+</script>

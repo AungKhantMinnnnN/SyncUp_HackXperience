@@ -1,0 +1,27 @@
+# Render blueprint — single free web service (API + Discord bot in one process).
+# Secrets are set in the Render dashboard, never here (sync: false). See CLAUDE.md.
+services:
+  - type: web
+    name: syncup-api
+    runtime: python
+    rootDir: api
+    plan: free
+    buildCommand: pip install -e . && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL          # Supabase Shared Pooler host, not the direct connection
+        sync: false
+      - key: FOUNDRY_BASE_URL
+        sync: false
+      - key: FOUNDRY_API_KEY
+        sync: false
+      - key: FOUNDRY_MODEL
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_TEST_GUILD_ID
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

@@ -1,0 +1,39 @@
+[project]
+name = "syncup"
+version = "0.1.0"
+description = "AI chief of staff for university student organizations, driven from Discord."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg",
+    "alembic",
+    "pydantic>=2",
+    "pydantic-settings",
+    "discord.py",
+    "openai",
+    "apscheduler",
+    "httpx",
+]
+
+[project.optional-dependencies]
+dev = ["ruff", "mypy", "pytest", "pytest-asyncio"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

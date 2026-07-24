@@ -1,0 +1,296 @@
+<meta charset="utf-8">
+<title>SyncUp — Resource Planning Module Flow</title>
+<style>
+  :root { --accent:#C8102E; --dark:#1A1A2E; --gray:#5A5A6E; --line:#E3E3E8; --bg:#FFFFFF; --soft:#FAFAFB; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; color:var(--dark);
+         background:var(--bg); margin:0; padding:48px 40px 90px; line-height:1.65; max-width:1100px; margin-inline:auto; }
+  h1 { font-size:38px; margin:0 0 6px; color:var(--accent); letter-spacing:-.02em; }
+  .sub { font-size:19px; color:var(--dark); margin:0 0 6px; }
+  .meta { font-size:13px; color:var(--gray); padding-bottom:18px; border-bottom:3px solid var(--accent); margin-bottom:36px; }
+  h2 { font-size:24px; margin:46px 0 8px; color:var(--accent); }
+  h3 { font-size:17px; margin:28px 0 6px; color:var(--dark); }
+  p, li { font-size:15px; }
+  code { background:var(--soft); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:13px; }
+  pre.code { background:#1A1A2E; color:#E8E8EE; border-radius:8px; padding:16px 18px; overflow-x:auto;
+             font-size:12.5px; line-height:1.55; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  pre.code .c { color:#8A93A8; }
+  table { border-collapse:collapse; width:100%; margin:14px 0 6px; font-size:14px; }
+  th { background:var(--accent); color:#fff; text-align:left; padding:9px 11px; font-weight:600; }
+  td { border-bottom:1px solid var(--line); padding:9px 11px; vertical-align:top; }
+  tr:nth-child(even) td { background:var(--soft); }
+  .diagram { border:1px solid var(--line); border-radius:12px; padding:20px; margin:18px 0; background:#fff; overflow-x:auto; }
+  .note { border-left:4px solid var(--accent); background:var(--soft); padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .warn { border-left:4px solid #B8860B; background:#FFFBEB; padding:12px 16px; border-radius:0 8px 8px 0; margin:16px 0; font-size:14px; }
+  .owner { display:inline-block; background:var(--accent); color:#fff; font-size:12px; font-weight:600;
+           padding:4px 12px; border-radius:99px; letter-spacing:.03em; }
+</style>
+
+<h1>Resource Planning Module</h1>
+<p class="sub">SyncUp — AI Operations Manager for Student Organizations</p>
+<p class="meta"><span class="owner">MEMBER B</span> &nbsp; Module 2 of 3 &nbsp;·&nbsp; <code>api/app/features/resources/</code> &nbsp;·&nbsp; Monolith: FastAPI · React · Supabase Postgres · Microsoft Foundry</p>
+
+<div class="note"><strong>Architecture note.</strong> SyncUp is a <strong>single FastAPI process</strong>. Your module is a Python package that scheduling <em>imports and calls directly</em>, sharing the same <code>AsyncSession</code> and the same transaction. There is no HTTP call, no queue, and no eventual consistency between modules.</div>
+
+<h2>1. Module Scope</h2>
+<p>Resource planning answers “what do we need, do we have it, and is anyone else using it?” It maintains the org's inventory of equipment and venues, uses the LLM to infer a packing list from an event description, and places time-bounded reservations — applying the same conflict-detection rigour to objects that scheduling applies to people.</p>
+<div class="note"><strong>Core idea to pitch:</strong> a projector booked 7–9pm Thursday is structurally identical to a person being busy 7–9pm Thursday. Resource conflicts run through the same interval-overlap primitive as calendar conflicts. One abstraction, two modules.</div>
+
+<h3>Files you own</h3>
+<pre class="code">api/app/features/resources/
+├── __init__.py
+├── router.py          <span class="c"># FastAPI routes only</span>
+├── schemas.py         <span class="c"># Pydantic + LLM output schemas</span>
+├── service.py         <span class="c"># business logic; exposes plan_for_event() to scheduling</span>
+├── availability.py    <span class="c"># PURE overlap math — no I/O, unit tested</span>
+└── agent.py           <span class="c"># LLM packing-list inference</span>
+
+api/app/models/resources.py     <span class="c"># resources, resource_reservations, packing_list_items</span>
+api/app/bot/commands/resources.py
+api/app/jobs/scheduler.py       <span class="c"># you add: expire_holds() every 5 min</span></pre>
+
+<h3>Also yours: the Discord bot skeleton</h3>
+<p>Ship <code>bot/client.py</code> and <code>bot/embeds.py</code> in the first three hours so A and C can register their own commands into a working bot. Shared embed builders are what make three people's features look like one product.</p>
+
+<h2>2. Module Placement Inside the Monolith</h2>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+  subgraph PROC["Single FastAPI process — Render web service"]
+    direction TB
+    SCH["features/scheduling/service.py"]
+    RT["resources/router.py<br/>/api/resources/*"]
+    BOTC["bot/commands/resources.py"]
+    SVC["resources/service.py<br/>plan_for_event, confirm, release"]
+    AGT["resources/agent.py<br/>LLM packing list"]
+    AVL["availability.py<br/>pure overlap math"]
+    JOB["jobs/scheduler.py<br/>expire_holds every 5 min"]
+
+    SCH -->|"direct call<br/>same session"| SVC
+    RT --> SVC
+    BOTC --> SVC
+    JOB --> SVC
+    SVC --> AGT
+    SVC --> AVL
+  end
+
+  UI["React dashboard<br/>Vercel"] -->|HTTPS| RT
+  AGT --> MF["Microsoft Foundry"]
+  SVC --> DB[("Supabase Postgres<br/>btree_gist exclusion")]
+</pre>
+</div>
+
+<h2>3. End-to-End Sequence — “What do we need, and can we get it?”</h2>
+<p>Participants are <em>modules in one process</em>. Solid arrows are function calls.</p>
+<div class="diagram">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as Organizer
+  participant SCH as scheduling/service.py
+  participant SVC as resources/service.py
+  participant AGT as resources/agent.py
+  participant MF as Microsoft Foundry
+  participant AVL as availability.py
+  participant DB as AsyncSession
+
+  Note over SCH,SVC: Called inside the confirm transaction.<br/>No HTTP. Same session.
+  SCH->>SVC: plan_for_event(db, event)
+
+  SVC->>DB: SELECT resources WHERE org_id
+  SVC->>AGT: infer_requirements(event, catalogue)
+  AGT->>MF: "orientation night, 100 people" + catalogue
+  MF-->>AGT: JSON item list
+  AGT->>AGT: Pydantic validate, match names to catalogue IDs
+  AGT-->>SVC: PackingItem list, unmatched flagged as unowned
+  SVC->>DB: INSERT packing_list_items source=ai
+
+  loop each owned item
+    SVC->>DB: SELECT reserved qty in window
+    SVC->>AVL: compute(total, reserved, requested)
+    AVL-->>SVC: OK, PARTIAL or CONFLICT
+  end
+
+  alt all available
+    SVC->>DB: INSERT resource_reservations status=held
+  else shortage
+    SVC->>DB: INSERT reservation for available portion
+    SVC->>AGT: suggest_alternatives(conflict)
+    AGT->>MF: chat completion
+    MF-->>AGT: "Chess Club has it 7-9pm - AV desk loans a spare"
+  end
+
+  SVC-->>SCH: ReservationPlan + conflicts + unowned_items
+  Note over SCH: Passes unowned_items straight to<br/>finance_service.draft_for_event()
+
+  SCH-->>U: single combined embed via the bot
+  U->>SVC: approve list, POST /api/resources/events/{id}/confirm
+  SVC->>DB: UPDATE holds to confirmed
+</pre>
+</div>
+
+<h2>4. Conflict Detection Logic</h2>
+<p>The whole module rests on one query. Get it right and everything else is CRUD.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart TD
+  A["Request: resource R, quantity Q, window S to E"] --> B["SELECT quantity_total FROM resources WHERE id=R"]
+  B --> C["SELECT COALESCE SUM quantity FROM resource_reservations<br/>WHERE resource_id=R<br/>AND status IN held, confirmed<br/>AND tstzrange overlaps window"]
+  C --> D["available = quantity_total - reserved"]
+  D --> E{"available >= Q?"}
+  E -- yes --> F["Create reservation status=held<br/>expires_at = now + 30 min"]
+  E -- "partial availability" --> G["Reserve available portion<br/>shortfall = Q minus available"]
+  E -- "none available" --> H["Hard conflict"]
+  G --> I["LLM suggests alternatives"]
+  H --> I
+  I --> J["Return conflict object<br/>with blocking event name"]
+  F --> K["Return OK"]
+  K --> L{"Approved within TTL?"}
+  L -- yes --> M["status = confirmed"]
+  L -- "TTL expires" --> N["expire_holds job: status = released"]
+</pre>
+</div>
+
+<h3>Preventing the double-book race in PostgreSQL</h3>
+<p>Two organizers approving at the same moment must not both get the projector. Push it into the database rather than the application — a strong technical detail for judging, and one that keeps working no matter what the code does.</p>
+<pre class="code"><span class="c">-- In migration 0002_resources</span>
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+<span class="c">-- Exclusive items: any overlap is impossible, enforced by the schema</span>
+ALTER TABLE resource_reservations
+  ADD CONSTRAINT no_double_booking
+  EXCLUDE USING gist (
+    resource_id WITH =,
+    tstzrange(start_utc, end_utc) WITH &amp;&amp;
+  ) WHERE (exclusive = true AND status IN ('held','confirmed','checked_out'));</pre>
+<pre class="code"><span class="c"># Pooled items (chairs, mics): quantity checked under a row lock.</span>
+<span class="c"># Note we do NOT open a transaction here — scheduling already did.</span>
+<span class="c"># We participate in the caller's transaction.</span>
+
+async def hold_pooled(db: AsyncSession, resource_id: UUID, qty: int,
+                      start: datetime, end: datetime) -&gt; Reservation:
+    res = await db.execute(
+        select(Resource).where(Resource.id == resource_id).with_for_update()
+    )
+    ...  <span class="c"># sum overlapping, compare, insert</span></pre>
+<div class="warn"><strong>Monolith rule: never call <code>db.begin()</code> or <code>db.commit()</code> inside your service functions.</strong> Scheduling opens the transaction and commits it. If you commit halfway through, a later failure in finance can no longer roll back your reservations — and the org ends up with equipment held for an event that was never created. Your functions take an <code>AsyncSession</code> and use it; they never manage its lifecycle.</div>
+
+<h2>5. Reservation State Machine</h2>
+<div class="diagram">
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> held: availability check passed
+  held --> confirmed: organizer approves
+  held --> released: TTL expires after 30 min
+  held --> released: organizer cancels
+  confirmed --> checked_out: picked up on event day
+  confirmed --> released: event cancelled
+  checked_out --> returned: item comes back
+  checked_out --> overdue: past event end + 24h
+  overdue --> returned
+  returned --> [*]
+  released --> [*]
+</pre>
+</div>
+
+<h2>6. Packing List Inference</h2>
+<p>The LLM's job is narrow and safe: map an event description onto the org's <em>existing</em> catalogue, and flag anything needed that the org does not own.</p>
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+  A["Event title, description<br/>expected_attendance"] --> B["Prompt with org catalogue<br/>injected as structured context"]
+  B --> C["Foundry LLM<br/>JSON schema output"]
+  C --> D{"Name matches catalogue?"}
+  D -- yes --> E["Link resource_id server-side<br/>quantity scaled by attendance"]
+  D -- no --> F["Unowned item"]
+  F --> G["Returned to scheduling, passed to<br/>finance as equipment_rental line"]
+  E --> H["Availability check"]
+  H --> I["packing_list_items rows"]
+  G --> I
+</pre>
+</div>
+<div class="warn"><strong>Guardrail:</strong> constrain the model to a JSON schema and validate with Pydantic. <strong>Match resource IDs server-side by name</strong> — never trust IDs the model emits. Unmatched names fall into the unowned path rather than raising. The pattern generalizes: the model proposes in an open vocabulary, the system resolves against a closed one.</div>
+
+<h2>7. Interface Exposed to Scheduling</h2>
+<p>These two functions are your contract with Member A. Agree on the signature in hour one; it is the only thing that blocks either of you.</p>
+<pre class="code"><span class="c"># app/features/resources/service.py — public interface</span>
+
+async def plan_for_event(db: AsyncSession, event: Event) -&gt; ReservationPlan:
+    """Called by scheduling inside the confirm transaction.
+    Infers requirements, checks availability, places holds.
+    MUST NOT commit — participates in the caller's transaction."""
+
+async def confirm_for_event(db: AsyncSession, event_id: UUID) -&gt; None:
+    """Promote held reservations to confirmed."""
+
+
+<span class="c"># app/features/resources/schemas.py</span>
+@dataclass(frozen=True)
+class ReservationPlan:
+    reservations:  list[ReservationView]
+    conflicts:     list[ConflictView]      <span class="c"># blocking event, suggested alternative</span>
+    unowned_items: list[UnownedItem]       <span class="c"># name, qty, est_cost -> finance</span>
+    venue_cost:    Decimal</pre>
+<p><strong>Import direction:</strong> scheduling imports resources. Resources must never import scheduling — take the <code>Event</code> as an argument instead. If you need a shared type, put it in <code>app/core/types.py</code>.</p>
+
+<h2>8. API Surface</h2>
+<p>Mounted under <code>/api/resources</code>. These serve the dashboard and manual bot commands; the main flow arrives via <code>plan_for_event()</code>, not HTTP.</p>
+<table>
+<tr><th>Method &amp; path</th><th>Purpose</th><th>Key response fields</th></tr>
+<tr><td><code>GET /?org_id=</code></td><td>Inventory catalogue</td><td><code>resources[]</code>, <code>quantity_total</code>, <code>category</code></td></tr>
+<tr><td><code>POST /</code></td><td>Add inventory item</td><td><code>resource_id</code></td></tr>
+<tr><td><code>GET /{id}/availability?from=&amp;to=</code></td><td>Timeline of free vs reserved quantity</td><td><code>intervals[]</code></td></tr>
+<tr><td><code>POST /events/{id}/packing-list/regenerate</code></td><td>Re-run LLM inference</td><td><code>items[]</code>, <code>conflicts[]</code></td></tr>
+<tr><td><code>POST /events/{id}/confirm</code></td><td>Promote holds to confirmed</td><td><code>status</code></td></tr>
+<tr><td><code>DELETE /reservations/{id}</code></td><td>Release a reservation</td><td><code>status</code></td></tr>
+<tr><td><code>GET /conflicts?org_id=</code></td><td>Dashboard conflict feed</td><td><code>conflicts[]</code> with blocking event</td></tr>
+</table>
+
+<h2>9. Tables Owned</h2>
+<table>
+<tr><th>Table</th><th>Access</th></tr>
+<tr><td><code>resources</code></td><td>Resources exclusive</td></tr>
+<tr><td><code>resource_reservations</code></td><td>Resources exclusive</td></tr>
+<tr><td><code>packing_list_items</code></td><td>Resources writes; finance reads unowned items</td></tr>
+<tr><td><code>venues</code></td><td>Resources writes; scheduling reads</td></tr>
+<tr><td><code>events</code></td><td>Read-only — owned by scheduling</td></tr>
+</table>
+<p>Your migration is <code>0002_resources</code>, branched from A's <code>0001_core</code>. Never edit another member's migration file.</p>
+
+<h2>10. React Dashboard Views</h2>
+<table>
+<tr><th>View</th><th>Contents</th></tr>
+<tr><td>Inventory table</td><td>Item, category, total qty, currently reserved, condition</td></tr>
+<tr><td>Resource timeline</td><td>Gantt-style bars per resource over 14 days; overlaps in accent red</td></tr>
+<tr><td>Conflict feed</td><td>Contested resources with the two competing events side by side</td></tr>
+<tr><td>Event packing list</td><td>Checklist with AI-suggested badge and availability status per line</td></tr>
+</table>
+
+<h2>11. Build Checklist — 24 Hours</h2>
+<table>
+<tr><th>Hours</th><th>Deliverable</th><th>Definition of done</th></tr>
+<tr><td>0–3</td><td>Bot skeleton + shared embed helpers</td><td>A and C can register commands into a working bot</td></tr>
+<tr><td>3–6</td><td><code>0002_resources</code> migration, <code>btree_gist</code> enabled</td><td>Overlapping insert is rejected in psql</td></tr>
+<tr><td>6–9</td><td>Seed catalogue: ~15 items, 2 existing bookings</td><td>Demo conflict reproducible on command</td></tr>
+<tr><td>9–13</td><td><code>availability.py</code> + unit tests</td><td>Partial-availability case returns correct shortfall</td></tr>
+<tr><td>13–16</td><td><code>plan_for_event()</code> exposed to scheduling</td><td>A calls it; nothing commits inside it</td></tr>
+<tr><td>16–19</td><td><code>agent.infer_requirements</code> with schema validation</td><td>“Orientation night, 100 people” yields a sane list</td></tr>
+<tr><td>19–21</td><td><code>expire_holds</code> APScheduler job</td><td>Hold auto-releases in a fast-clock test</td></tr>
+<tr><td>21–24</td><td>Timeline view + integration</td><td>Conflict visible in dashboard during rehearsal</td></tr>
+</table>
+<div class="note"><strong>Demo tip:</strong> pre-seed the Chess Club projector booking so the conflict fires reliably on stage. A live-detected conflict is the most convincing moment in this module — do not leave it to chance.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+mermaid.initialize({
+  startOnLoad:true, theme:'base', securityLevel:'loose',
+  themeVariables:{
+    primaryColor:'#FDECEE', primaryTextColor:'#1A1A2E', primaryBorderColor:'#C8102E',
+    lineColor:'#8A8A9A', secondaryColor:'#F5F5F7', tertiaryColor:'#FAFAFB',
+    fontFamily:'-apple-system,BlinkMacSystemFont,Segoe UI,Inter,sans-serif', fontSize:'14px'
+  },
+  flowchart:{ curve:'basis', padding:14 },
+  sequence:{ actorMargin:40, boxMargin:8 }
+});
+</script>
