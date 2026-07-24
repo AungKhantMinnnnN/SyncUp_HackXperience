@@ -13,3 +13,4 @@ node_modules/
 dist/
 .vercel/
 
+syncup.egg.info

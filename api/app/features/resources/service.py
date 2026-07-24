@@ -111,6 +111,46 @@ _EVENT_QUERY = text(
 )
 
 
+_BLOCKING_EVENT_QUERY = text(
+    """
+    SELECT e.title
+    FROM resource_reservations r
+    JOIN events e ON e.id = r.event_id
+    WHERE r.resource_id = :resource_id
+      AND r.status IN ('held', 'confirmed', 'checked_out')
+      AND r.start_utc < :end_utc
+      AND r.end_utc > :start_utc
+      AND (CAST(:exclude_event_id AS uuid) IS NULL OR r.event_id <> CAST(:exclude_event_id AS uuid))
+    ORDER BY r.start_utc
+    LIMIT 1
+    """
+)
+
+
+async def _blocking_event_title(
+    db: AsyncSession,
+    resource_id: UUID,
+    start_utc: datetime,
+    end_utc: datetime,
+    exclude_event_id: UUID | None = None,
+) -> str | None:
+    """The title of an event already holding this resource over [start, end) — the
+    "competing event" the conflict feed shows. Read against scheduling's events table
+    via raw SQL (one-way import rule: never import scheduling's model)."""
+    row = (
+        await db.execute(
+            _BLOCKING_EVENT_QUERY,
+            {
+                "resource_id": resource_id,
+                "start_utc": start_utc,
+                "end_utc": end_utc,
+                "exclude_event_id": exclude_event_id,
+            },
+        )
+    ).first()
+    return row[0] if row else None
+
+
 async def load_event_view(db: AsyncSession, event_id: UUID) -> EventView | None:
     """Read-only lookup of an event for the routes that need one (regenerate,
     confirm). Returns None if no such event exists yet."""
@@ -255,6 +295,9 @@ async def plan_for_event(db: AsyncSession, event: EventView) -> ReservationPlan:
                 shortfall=result.shortfall,
                 catalogue_alternatives=alternatives,
             )
+            blocking_title = await _blocking_event_title(
+                db, resource.id, event.start_utc, event.end_utc, exclude_event_id=event.id
+            )
             conflicts.append(
                 ConflictView(
                     resource_name=resource.name,
@@ -262,7 +305,7 @@ async def plan_for_event(db: AsyncSession, event: EventView) -> ReservationPlan:
                     requested=item.quantity,
                     available=result.available,
                     shortfall=result.shortfall,
-                    blocking_event_title=None,  # needs a join to events; scheduling model isn't written yet
+                    blocking_event_title=blocking_title,
                     suggested_alternative=alternative_text,
                 )
             )
@@ -502,6 +545,16 @@ async def list_conflicts(db: AsyncSession, org_id: UUID) -> list[ConflictView]:
     for item, resource, reserved in (await db.execute(query)).all():
         reserved = reserved or 0
         if reserved < item.quantity:
+            # N+1 over the (small) set of conflicting items — resolve the requesting
+            # event's window, then find who else holds the resource in it.
+            event = await load_event_view(db, item.event_id) if item.event_id else None
+            blocking_title = (
+                await _blocking_event_title(
+                    db, resource.id, event.start_utc, event.end_utc, exclude_event_id=item.event_id
+                )
+                if event
+                else None
+            )
             conflicts.append(
                 ConflictView(
                     resource_name=resource.name,
@@ -509,7 +562,7 @@ async def list_conflicts(db: AsyncSession, org_id: UUID) -> list[ConflictView]:
                     requested=item.quantity,
                     available=reserved,
                     shortfall=item.quantity - reserved,
-                    blocking_event_title=None,
+                    blocking_event_title=blocking_title,
                 )
             )
     return conflicts

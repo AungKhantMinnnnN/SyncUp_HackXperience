@@ -39,7 +39,9 @@ Rules:
   from the catalogue.
 - Never invent a database ID. You only ever name items; the system resolves IDs.
 - Do not propose duplicate or near-duplicate items.
-- Return JSON matching the given schema only — no prose outside the schema."""
+- Return ONLY a JSON object of this exact shape — no prose, no markdown fence:
+  {"items": [{"name": string, "quantity": integer, "category": string or null,
+              "estimated_unit_cost": number or null}]}"""
 
 ALTERNATIVES_SYSTEM_PROMPT = """You are the resource-planning assistant for SyncUp. A \
 requested resource is short for an event. Using only the facts given to you, write one \
@@ -64,6 +66,14 @@ class InferredPackingItem(BaseModel):
 
 class InferredPackingList(BaseModel):
     items: list[InferredPackingItem]
+
+
+def _extract_json(text: str) -> str:
+    """Tolerate a stray markdown fence — take the outermost { ... }. Same technique
+    scheduling's parse_intent uses, so both agents work through the hosted agent
+    (agent_reference) path, which doesn't honor per-call json_schema formats."""
+    start, end = text.find("{"), text.rfind("}")
+    return text[start : end + 1] if start != -1 and end != -1 else text
 
 
 def _catalogue_context(catalogue: list[Resource]) -> list[dict]:
@@ -106,29 +116,25 @@ async def infer_requirements(
         "catalogue": _catalogue_context(catalogue),
     }
 
+    messages = [
+        {"role": "system", "content": INFER_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(context)},
+    ]
     started = time.monotonic()
     response = None
+    items: list[InferredPackingItem] = []
     try:
-        response = await run_in_threadpool(
-            agent_response,
-            input=[
-                {"role": "system", "content": INFER_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(context)},
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "packing_list",
-                    "schema": InferredPackingList.model_json_schema(),
-                    "strict": True,
-                }
-            },
-        )
-        parsed = InferredPackingList.model_validate_json(response.output_text)
-        return parsed.items
-    except Exception:
+        for _ in range(3):  # initial + 2 retries, like scheduling's parse_intent
+            response = await run_in_threadpool(agent_response, input=messages)
+            try:
+                items = InferredPackingList.model_validate_json(
+                    _extract_json(response.output_text)
+                ).items
+                break
+            except Exception:  # noqa: BLE001 — malformed output; retry, never patch it
+                continue
+    except Exception:  # noqa: BLE001 — Foundry unreachable/misconfigured; safe-empty draft
         logger.warning("infer_requirements failed for event org_id=%s", event.org_id, exc_info=True)
-        return []
     finally:
         _safe_log(
             db,
@@ -138,6 +144,7 @@ async def infer_requirements(
             latency_ms=int((time.monotonic() - started) * 1000),
             org_id=event.org_id,
         )
+    return items
 
 
 async def suggest_alternatives(

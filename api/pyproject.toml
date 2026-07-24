@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["ruff", "mypy", "pytest", "pytest-asyncio"]
+dev = ["ruff", "mypy"]
 
 [tool.ruff]
 line-length = 100
@@ -34,9 +34,6 @@ ignore = ["B008"]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
 
 [build-system]
 requires = ["setuptools"]

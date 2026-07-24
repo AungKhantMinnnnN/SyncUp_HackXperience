@@ -10,63 +10,92 @@ from app.config import settings
 from app.db import with_session
 from app.features.resources import service
 
-# Placeholder in-memory catalogue for the two demo-safe commands below (/inventory,
-# /packing-list), which stay mocked deliberately — see their docstrings. The newer
-# commands (add-resource, availability, reservations, release) are real, DB-backed
-# calls into features/resources/service.py.
-_MOCK_CATALOGUE = [
-    {"name": "Projector", "category": "AV", "quantity_total": 1, "exclusive": True},
-    {"name": "Wireless mic", "category": "AV", "quantity_total": 4, "exclusive": False},
-    {"name": "Folding chair", "category": "furniture", "quantity_total": 120, "exclusive": False},
-    {"name": "Sign-in table", "category": "furniture", "quantity_total": 2, "exclusive": False},
-    {"name": "Event banner", "category": "signage", "quantity_total": 3, "exclusive": False},
-]
-
-
 def register(tree: app_commands.CommandTree) -> None:
-    @tree.command(name="inventory", description="List the org's tracked equipment and venues")
+    @tree.command(name="inventory", description="List the org's tracked equipment")
     async def inventory(interaction: discord.Interaction) -> None:
-        # Stays mocked on purpose: a demo-safe command that works even without a real
-        # DATABASE_URL. Use /add-resource + a real Postgres to see live inventory.
+        await interaction.response.defer(thinking=True)
+        try:
+            resources = await with_session(service.list_catalogue, settings.org_id)
+        except Exception as exc:  # noqa: BLE001 — command boundary: always reply
+            await interaction.followup.send(embed=embeds.error_embed("Couldn't load inventory", str(exc)))
+            return
+
+        if not resources:
+            await interaction.followup.send(
+                embed=embeds.info_embed("Equipment inventory", "Nothing yet — add one with /add-resource.")
+            )
+            return
+
         embed = embeds.info_embed("Equipment inventory")
-        for item in _MOCK_CATALOGUE:
-            kind = "exclusive" if item["exclusive"] else "pooled"
+        for r in resources:
+            kind = "exclusive" if r.exclusive else "pooled"
             embed.add_field(
-                name=item["name"],
-                value=f"{item['quantity_total']} total · {kind} · {item['category']}",
+                name=r.name,
+                value=f"{r.quantity_total} total · {kind} · {r.category or 'uncategorized'}",
                 inline=True,
             )
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     @tree.command(
         name="packing-list",
-        description="Preview an AI-generated packing list for an event description",
+        description="Generate the AI packing list for a confirmed event",
     )
-    @app_commands.describe(description="Describe the event, e.g. '100-person orientation night'")
-    async def packing_list(interaction: discord.Interaction, description: str) -> None:
-        # Stub response: plan_for_event() needs a real Event row (created by scheduling
-        # inside the confirm transaction). Keeps the command surface and embed shape
-        # agreed on; swap for a real call once /plan produces events you can point at.
+    @app_commands.describe(event_id="The event's UUID (from a /plan confirmation)")
+    async def packing_list(interaction: discord.Interaction, event_id: str) -> None:
         await interaction.response.defer(thinking=True)
+        try:
+            eid = UUID(event_id)
+        except ValueError:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Invalid ID", f"'{event_id}' isn't a valid UUID.")
+            )
+            return
 
-        mock_items = [
-            {
-                "name": "Projector",
-                "quantity": 1,
-                "available": False,
-                "note": "Booked by Chess Club 7–9pm — alternatives suggested",
-            },
-            {"name": "Wireless mic", "quantity": 2, "available": True},
-            {"name": "Folding chair", "quantity": 100, "available": True},
-            {"name": "Sign-in table", "quantity": 1, "available": True},
-        ]
-        embed = embeds.packing_list_embed(description, mock_items)
-        embed = embeds.conflict_field(
-            embed,
-            item_name="Projector",
-            blocking_event="Chess Club meeting",
-            alternative="AV desk has one spare unit",
-        )
+        # Real generation against the org's seeded catalogue: infer -> hold -> persist,
+        # then read back the actual packing_list_items. Commits its own transaction
+        # (nothing wraps it here, unlike scheduling's confirm).
+        async def _generate(db: AsyncSession):
+            event = await service.load_event_view(db, eid)
+            if event is None or event.org_id != settings.org_id:
+                return None
+            plan = await service.plan_for_event(db, event)
+            await db.commit()
+            items = await service.list_packing_list_items(db, eid)
+            return event.title, plan, items
+
+        try:
+            result = await with_session(_generate)
+        except Exception as exc:  # noqa: BLE001 — command boundary: always reply
+            await interaction.followup.send(embed=embeds.error_embed("Couldn't build packing list", str(exc)))
+            return
+
+        if result is None:
+            await interaction.followup.send(
+                embed=embeds.warning_embed("Event not found", f"No event `{event_id}` in this org.")
+            )
+            return
+
+        title, plan, items = result
+        if not items:
+            await interaction.followup.send(
+                embed=embeds.warning_embed(
+                    "Empty packing list", "The planner returned no items — check Foundry config / server logs."
+                )
+            )
+            return
+
+        embed = embeds.info_embed(f"Packing list — {title}")
+        for it in items:
+            tag = "✅ owned" if it.org_owned else "🛒 to buy"
+            cost = f" · ${it.est_cost}" if it.est_cost is not None else ""
+            embed.add_field(name=it.item_name, value=f"x{it.quantity} · {tag}{cost}", inline=True)
+        for c in plan.conflicts:
+            embed = embeds.conflict_field(
+                embed,
+                item_name=f"{c.resource_name} (short {c.shortfall})",
+                blocking_event=f"requested {c.requested}, has {c.available}",
+                alternative=c.suggested_alternative,
+            )
         await interaction.followup.send(embed=embed)
 
     @tree.command(name="add-resource", description="Add an item to the org's equipment catalogue")
@@ -218,8 +247,8 @@ def register(tree: app_commands.CommandTree) -> None:
         for c in rows:
             embed = embeds.conflict_field(
                 embed,
-                item_name=f"{c.resource_name} (short {c.shortfall})",
-                blocking_event=f"requested {c.requested}, has {c.available}",
+                item_name=f"{c.resource_name} — short {c.shortfall} (need {c.requested}, have {c.available})",
+                blocking_event=c.blocking_event_title or "another reservation",
                 alternative=c.suggested_alternative,
             )
         await interaction.followup.send(embed=embed)
