@@ -54,7 +54,7 @@ def estimate_from_lines(
 
 @dataclass(frozen=True, slots=True)
 class Headroom:
-    remaining: Decimal   # allocated - committed - actual (before this event)
+    remaining: Decimal   # allocated - max(committed, actual)  (before this event)
     after: Decimal       # remaining - proposed
     verdict: Verdict
 
@@ -67,14 +67,18 @@ def check(
 ) -> Headroom:
     """Semester headroom verdict for a proposed event budget.
 
-    remaining = allocated - committed - actual
+    remaining = allocated - max(committed, actual)
     after     = remaining - proposed
+
+    `actual` (money spent) is money already inside `committed` (approved estimates), so
+    the two must not both be subtracted — that would double-count spend. We take the
+    larger, so overspend beyond the committed estimate still eats into headroom.
 
     OK    — after >= 0
     TIGHT — after < 0 but within 10% of allocated (warn, still allow)
     OVER  — worse than that (block approval)
     """
-    remaining = quantize_money(allocated - committed - actual)
+    remaining = quantize_money(allocated - max(committed, actual))
     after = quantize_money(remaining - proposed)
 
     if after >= Decimal("0"):

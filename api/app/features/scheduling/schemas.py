@@ -40,9 +40,40 @@ class BusyOut(BaseModel):
     end_utc: datetime
 
 
+class EventBusyOut(BaseModel):
+    member_id: UUID
+    title: str
+    start_utc: datetime
+    end_utc: datetime
+
+
 class CalendarOut(BaseModel):
     members: list[MemberOut] = []
     busy: list[BusyOut] = []
+    events: list[EventBusyOut] = []
+
+
+class MemberConflictOut(BaseModel):
+    member: str
+    member_id: UUID
+    event_a: str
+    event_a_id: UUID
+    event_b: str
+    event_b_id: UUID
+
+
+class RemoveAttendeesIn(BaseModel):
+    member_ids: list[UUID]
+
+
+class RecommendIn(BaseModel):
+    event_a: str
+    event_b: str
+    members: list[str]
+
+
+class RecommendOut(BaseModel):
+    recommendation: str
 
 
 class CreateRequestIn(BaseModel):

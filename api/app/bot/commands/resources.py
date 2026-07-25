@@ -7,8 +7,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot import embeds
 from app.config import settings
+from app.core.time import now_utc
 from app.db import with_session
 from app.features.resources import service
+from app.features.scheduling import service as sched
+
+
+# --- Autocomplete: users pick by name; the UUID travels as the hidden choice value ---
+
+
+async def _reservation_choices(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    try:
+        rows = await with_session(service.list_active_reservations, settings.org_id)
+    except Exception:  # noqa: BLE001 — autocomplete must never raise
+        return []
+    cur = current.lower()
+    out = []
+    for r, name in rows:
+        label = f"{name} · {r.start_utc:%a %d %b %H:%M} ({r.status})"
+        if cur in label.lower():
+            out.append(app_commands.Choice(name=label[:100], value=str(r.id)))
+    return out[:25]
+
+
+async def _event_choices(
+    interaction: discord.Interaction, current: str
+) -> list[app_commands.Choice[str]]:
+    now = now_utc()
+    try:
+        events = await with_session(
+            sched.list_events, now - timedelta(days=7), now + timedelta(days=30)
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    cur = current.lower()
+    out = []
+    for e in events:
+        label = f"{e.title} · {e.start_utc:%d %b}"
+        if cur in label.lower():
+            out.append(app_commands.Choice(name=label[:100], value=str(e.id)))
+    return out[:25]
+
 
 def register(tree: app_commands.CommandTree) -> None:
     @tree.command(name="inventory", description="List the org's tracked equipment")
@@ -40,14 +81,15 @@ def register(tree: app_commands.CommandTree) -> None:
         name="packing-list",
         description="Generate the AI packing list for a confirmed event",
     )
-    @app_commands.describe(event_id="The event's UUID (from a /plan confirmation)")
-    async def packing_list(interaction: discord.Interaction, event_id: str) -> None:
+    @app_commands.describe(event="Pick the event (type to search)")
+    @app_commands.autocomplete(event=_event_choices)
+    async def packing_list(interaction: discord.Interaction, event: str) -> None:
         await interaction.response.defer(thinking=True)
         try:
-            eid = UUID(event_id)
+            eid = UUID(event)
         except ValueError:
             await interaction.followup.send(
-                embed=embeds.error_embed("Invalid ID", f"'{event_id}' isn't a valid UUID.")
+                embed=embeds.error_embed("Invalid selection", "Pick an event from the list.")
             )
             return
 
@@ -71,7 +113,7 @@ def register(tree: app_commands.CommandTree) -> None:
 
         if result is None:
             await interaction.followup.send(
-                embed=embeds.warning_embed("Event not found", f"No event `{event_id}` in this org.")
+                embed=embeds.warning_embed("Event not found", "That event isn't in this org.")
             )
             return
 
@@ -195,20 +237,21 @@ def register(tree: app_commands.CommandTree) -> None:
         for r in rows:
             embed.add_field(
                 name=f"{r.start_utc:%b %d %H:%M} – {r.end_utc:%b %d %H:%M} UTC",
-                value=f"qty {r.quantity} · {r.status} · id `{r.id}`",
+                value=f"qty {r.quantity} · {r.status}",
                 inline=False,
             )
         await interaction.followup.send(embed=embed)
 
     @tree.command(name="release", description="Release a held or confirmed reservation")
-    @app_commands.describe(reservation_id="The reservation's UUID — see /reservations")
-    async def release(interaction: discord.Interaction, reservation_id: str) -> None:
+    @app_commands.describe(reservation="Pick the reservation to release")
+    @app_commands.autocomplete(reservation=_reservation_choices)
+    async def release(interaction: discord.Interaction, reservation: str) -> None:
         await interaction.response.defer(thinking=True)
         try:
-            rid = UUID(reservation_id)
+            rid = UUID(reservation)
         except ValueError:
             await interaction.followup.send(
-                embed=embeds.error_embed("Invalid ID", f"'{reservation_id}' isn't a valid UUID.")
+                embed=embeds.error_embed("Invalid selection", "Pick a reservation from the list.")
             )
             return
 
@@ -225,7 +268,7 @@ def register(tree: app_commands.CommandTree) -> None:
             await interaction.followup.send(embed=embeds.success_embed("Reservation released"))
         else:
             await interaction.followup.send(
-                embed=embeds.warning_embed("Not found", f"No reservation with ID `{reservation_id}` in this org.")
+                embed=embeds.warning_embed("Not found", "That reservation isn't in this org.")
             )
 
     @tree.command(name="conflicts", description="Show resources that are short of what events requested")
@@ -254,14 +297,15 @@ def register(tree: app_commands.CommandTree) -> None:
         await interaction.followup.send(embed=embed)
 
     @tree.command(name="confirm", description="Promote an event's held reservations to confirmed")
-    @app_commands.describe(event_id="The event's UUID")
-    async def confirm(interaction: discord.Interaction, event_id: str) -> None:
+    @app_commands.describe(event="Pick the event")
+    @app_commands.autocomplete(event=_event_choices)
+    async def confirm(interaction: discord.Interaction, event: str) -> None:
         await interaction.response.defer(thinking=True)
         try:
-            eid = UUID(event_id)
+            eid = UUID(event)
         except ValueError:
             await interaction.followup.send(
-                embed=embeds.error_embed("Invalid ID", f"'{event_id}' isn't a valid UUID.")
+                embed=embeds.error_embed("Invalid selection", "Pick an event from the list.")
             )
             return
 
@@ -275,4 +319,4 @@ def register(tree: app_commands.CommandTree) -> None:
             await interaction.followup.send(embed=embeds.error_embed("Couldn't confirm", str(exc)))
             return
 
-        await interaction.followup.send(embed=embeds.success_embed("Confirmed", f"Event `{event_id}` holds are now confirmed."))
+        await interaction.followup.send(embed=embeds.success_embed("Confirmed", "Held reservations are now confirmed."))

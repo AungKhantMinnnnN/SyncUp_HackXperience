@@ -67,7 +67,35 @@ export const getEvents = (from: string, to: string) =>
 
 export type MemberInfo = { id: string; full_name: string; role: string };
 export type BusyBlock = { member_id: string; kind: string; start_utc: string; end_utc: string };
-export type CalendarData = { members: MemberInfo[]; busy: BusyBlock[] };
+export type CalendarEvent = { member_id: string; title: string; start_utc: string; end_utc: string };
+export type CalendarData = { members: MemberInfo[]; busy: BusyBlock[]; events: CalendarEvent[] };
+
+export const getMembers = () => api<MemberInfo[]>(`${BASE}/members`);
 
 export const getCalendar = (from: string, to: string) =>
   api<CalendarData>(`${BASE}/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+
+export type MemberConflict = {
+  member: string;
+  member_id: string;
+  event_a: string;
+  event_a_id: string;
+  event_b: string;
+  event_b_id: string;
+};
+export const getMemberConflicts = () => api<MemberConflict[]>(`${BASE}/member-conflicts`);
+
+export const removeAttendees = (eventId: string, memberIds: string[]) =>
+  api<{ removed: number }>(`${BASE}/events/${eventId}/remove-attendees`, {
+    method: "POST",
+    body: JSON.stringify({ member_ids: memberIds }),
+  });
+
+export const recommendMemberResolution = (event_a: string, event_b: string, members: string[]) =>
+  api<{ recommendation: string }>(`${BASE}/member-conflicts/recommend`, {
+    method: "POST",
+    body: JSON.stringify({ event_a, event_b, members }),
+  });
+
+export const rescheduleEvent = (eventId: string) =>
+  api<EventItem>(`${BASE}/events/${eventId}/reschedule`, { method: "POST" });

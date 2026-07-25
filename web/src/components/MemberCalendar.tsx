@@ -2,6 +2,7 @@
 // personal) rendered on a standard month grid, in the org's timezone.
 import { useEffect, useMemo, useState } from "react";
 import { getCalendar, type CalendarData } from "../api/scheduling";
+import { isOfficer } from "./MemberName";
 import { DAY } from "../util";
 
 const KIND_COLOR: Record<string, string> = {
@@ -33,7 +34,7 @@ function monthCells(y: number, m: number) {
   return cells;
 }
 
-export function MemberCalendar({ tz }: { tz: string }) {
+export function MemberCalendar({ tz, refreshKey = 0 }: { tz: string; refreshKey?: number }) {
   const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: tz });
   const [ty, tm] = todayKey.split("-").map(Number);
   const [anchor, setAnchor] = useState({ y: ty, m: tm });
@@ -47,7 +48,7 @@ export function MemberCalendar({ tz }: { tz: string }) {
     getCalendar(from, to)
       .then(setData)
       .catch((e) => setErr((e as Error).message));
-  }, [anchor]);
+  }, [anchor, refreshKey]);
 
   const memberId = selected || data?.members[0]?.id || "";
 
@@ -59,6 +60,16 @@ export function MemberCalendar({ tz }: { tz: string }) {
       (map[k] ??= []).push({ kind: b.kind, start: b.start_utc, end: b.end_utc });
     }
     for (const k of Object.keys(map)) map[k].sort((a, b) => a.start.localeCompare(b.start));
+    return map;
+  }, [data, memberId, tz]);
+
+  const eventsByDay = useMemo(() => {
+    const map: Record<string, { title: string; start: string }[]> = {};
+    for (const e of data?.events ?? []) {
+      if (e.member_id !== memberId) continue;
+      const k = dayKey(e.start_utc, tz);
+      (map[k] ??= []).push({ title: e.title, start: e.start_utc });
+    }
     return map;
   }, [data, memberId, tz]);
 
@@ -91,6 +102,7 @@ export function MemberCalendar({ tz }: { tz: string }) {
             onClick={() => setSelected(mem.id)}
           >
             {mem.full_name}
+            {isOfficer(mem.role) && <span className="role-badge">{mem.role}</span>}
           </button>
         ))}
       </div>
@@ -107,6 +119,15 @@ export function MemberCalendar({ tz }: { tz: string }) {
           return (
             <div className={`cal-cell${c.key === todayKey ? " today" : ""}`} key={i}>
               <div className="cal-date">{c.day}</div>
+              {(eventsByDay[c.key] ?? []).map((ev, j) => (
+                <span
+                  className="cal-event"
+                  key={`e${j}`}
+                  title={`${ev.title} · ${hhmm(ev.start, tz)}`}
+                >
+                  ★ {ev.title}
+                </span>
+              ))}
               {blocks.slice(0, 3).map((b, j) => (
                 <span
                   className="cal-chip"
@@ -124,6 +145,10 @@ export function MemberCalendar({ tz }: { tz: string }) {
       </div>
 
       <div className="legend">
+        <span>
+          <span className="dot" style={{ background: "#fff", border: "1px solid var(--ink)" }} />
+          ★ event
+        </span>
         {Object.entries(KIND_COLOR).map(([kind, color]) => (
           <span key={kind}>
             <span className="dot" style={{ background: color }} />

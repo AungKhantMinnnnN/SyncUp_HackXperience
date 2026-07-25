@@ -1,12 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MemberCalendar } from "../components/MemberCalendar";
+import { MemberConflictCard, type ConflictGroup } from "../components/MemberConflictCard";
+import { MemberList } from "../components/MemberName";
 import {
   confirmProposal,
   createRequest,
   getEvents,
+  getMemberConflicts,
+  getMembers,
   getRequest,
   type EventItem,
   type EventPlan,
+  type MemberConflict,
+  type MemberInfo,
   type Proposal,
   type RequestStatus,
 } from "../api/scheduling";
@@ -17,6 +23,31 @@ const hhmm = (iso: string, tz: string) =>
 
 export function Calendar({ tz }: { tz: string }) {
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [conflicts, setConflicts] = useState<MemberConflict[]>([]);
+  const [roster, setRoster] = useState<MemberInfo[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const loadConflicts = useCallback(() => {
+    getMemberConflicts().then(setConflicts).catch(() => {});
+  }, []);
+  const loadEvents = useCallback(() => {
+    const now = new Date();
+    getEvents(now.toISOString(), new Date(now.getTime() + 14 * DAY).toISOString())
+      .then(setEvents)
+      .catch(() => {});
+  }, []);
+  const loadRoster = useCallback(() => {
+    getMembers().then(setRoster).catch(() => {});
+  }, []);
+  const reloadAfterResolve = useCallback(() => {
+    loadConflicts();
+    loadEvents();
+    loadRoster();
+    setRefreshKey((k) => k + 1); // force the member calendars to refetch too
+  }, [loadConflicts, loadEvents, loadRoster]);
+  const roleByName = useMemo(
+    () => Object.fromEntries(roster.map((m) => [m.full_name, m.role])),
+    [roster],
+  );
   const [prompt, setPrompt] = useState("2 hour exec meeting next week, before Friday evening");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -24,11 +55,21 @@ export function Calendar({ tz }: { tz: string }) {
   const [confirmed, setConfirmed] = useState<EventPlan | null>(null);
 
   useEffect(() => {
-    const now = new Date();
-    getEvents(now.toISOString(), new Date(now.getTime() + 14 * DAY).toISOString())
-      .then(setEvents)
-      .catch(() => {});
-  }, []);
+    loadEvents();
+    loadRoster();
+    loadConflicts();
+  }, [loadEvents, loadRoster, loadConflicts]);
+
+  // A member in two overlapping events, grouped by the clashing event pair.
+  const conflictGroups = useMemo<ConflictGroup[]>(() => {
+    const map: Record<string, ConflictGroup> = {};
+    for (const c of conflicts) {
+      const key = `${c.event_a_id}|${c.event_b_id}`;
+      (map[key] ??= { a: c.event_a, aId: c.event_a_id, b: c.event_b, bId: c.event_b_id, members: [] })
+        .members.push({ id: c.member_id, name: c.member });
+    }
+    return Object.values(map);
+  }, [conflicts]);
 
   async function findTimes() {
     setBusy(true);
@@ -50,6 +91,7 @@ export function Calendar({ tz }: { tz: string }) {
     setErr(null);
     try {
       setConfirmed(await confirmProposal(p.id));
+      reloadAfterResolve(); // show the new event (and any new conflict) immediately
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -59,6 +101,15 @@ export function Calendar({ tz }: { tz: string }) {
 
   return (
     <>
+      {conflictGroups.map((g) => (
+        <MemberConflictCard
+          key={`${g.aId}|${g.bId}`}
+          group={g}
+          roleByName={roleByName}
+          onResolved={reloadAfterResolve}
+        />
+      ))}
+
       <div className="panel">
         <div className="panel-head">
           <h2>Team availability</h2>
@@ -68,7 +119,7 @@ export function Calendar({ tz }: { tz: string }) {
           Each member's commitments — class, exam, work, club, personal. Every block is a claim on
           someone's time; the scheduler only proposes windows with no overlap.
         </p>
-        <MemberCalendar tz={tz} />
+        <MemberCalendar tz={tz} refreshKey={refreshKey} />
       </div>
 
       <div className="panel">
@@ -117,7 +168,9 @@ export function Calendar({ tz }: { tz: string }) {
                       {p.conflicts.length > 0 && ` · ${p.conflicts.join(", ")}`}
                     </div>
                     {p.available_members.length > 0 && (
-                      <div className="free">✓ {p.available_members.join(", ")}</div>
+                      <div className="free">
+                        ✓ <MemberList names={p.available_members} roleByName={roleByName} />
+                      </div>
                     )}
                   </div>
                   <button className="btn" onClick={() => confirm(p)} disabled={busy}>
@@ -153,7 +206,9 @@ export function Calendar({ tz }: { tz: string }) {
                 {e.members.length > 0 && (
                   <div className="ecard-row">
                     <span className="k">Members</span>
-                    <span>{e.members.length} · {e.members.join(", ")}</span>
+                    <span>
+                      {e.members.length} · <MemberList names={e.members} roleByName={roleByName} />
+                    </span>
                   </div>
                 )}
                 {e.items.length > 0 && (

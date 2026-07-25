@@ -219,6 +219,21 @@ body {
 .cal-cell.today .cal-date { color: var(--ink); font-weight: 700; }
 .cal-chip { display: block; font-family: var(--mono); font-size: 9px; color: #fff; border-radius: 3px; padding: 1px 5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-more { font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 2px; }
+.cal-event {
+  display: block;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-top: 3px;
+  background: #fff;
+  border: 1px solid var(--ink);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em; color: var(--muted); margin-top: 14px; }
 .legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
 @media (max-width: 640px) {
@@ -239,6 +254,21 @@ body {
   font-size: 14px;
 }
 .headroom-text strong { font-family: var(--mono); }
+
+/* ---- member role differentiation ---- */
+.mname.officer { font-weight: 600; color: var(--ink); }
+.role-badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: #e7eaf1;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
 
 .muted { color: var(--muted); }
 .err { color: var(--signal); font-family: var(--mono); font-size: 13px; }

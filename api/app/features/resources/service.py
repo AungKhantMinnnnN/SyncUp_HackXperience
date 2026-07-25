@@ -468,6 +468,20 @@ async def list_reservations_for_resource(
     return list(result.scalars().all())
 
 
+async def list_active_reservations(
+    db: AsyncSession, org_id: UUID
+) -> list[tuple[ResourceReservation, str]]:
+    """All active (held/confirmed/checked_out) reservations in the org, each paired with
+    its resource name — backs the bot's reservation picker (autocomplete)."""
+    result = await db.execute(
+        select(ResourceReservation, Resource.name)
+        .join(Resource, ResourceReservation.resource_id == Resource.id)
+        .where(Resource.org_id == org_id, ResourceReservation.status.in_(RESERVED_STATUSES))
+        .order_by(ResourceReservation.start_utc)
+    )
+    return [(r, name) for r, name in result.all()]
+
+
 async def _get_reservation_in_org(
     db: AsyncSession, org_id: UUID, reservation_id: UUID
 ) -> ResourceReservation | None:

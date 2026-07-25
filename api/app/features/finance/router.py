@@ -67,9 +67,13 @@ async def summary(db: AsyncSession = Depends(get_db)) -> dict:
     event_rows = (
         await db.execute(
             text(
-                "SELECT eb.id, eb.estimated_total, eb.actual_total, eb.stated_cap, eb.status, "
-                "e.title FROM event_budgets eb JOIN events e ON e.id = eb.event_id "
-                "WHERE eb.budget_id = :b ORDER BY eb.estimated_total DESC"
+                # DISTINCT ON: one row per event — the latest non-cancelled budget —
+                # so a superseded/regenerated budget doesn't double-count or double-list.
+                "SELECT DISTINCT ON (eb.event_id) eb.id, eb.estimated_total, eb.actual_total, "
+                "eb.stated_cap, eb.status, e.title "
+                "FROM event_budgets eb JOIN events e ON e.id = eb.event_id "
+                "WHERE eb.budget_id = :b AND eb.status <> 'cancelled' "
+                "ORDER BY eb.event_id, eb.created_at DESC"
             ),
             {"b": budget["id"]},
         )

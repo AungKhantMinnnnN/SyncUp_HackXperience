@@ -116,16 +116,15 @@ async def infer_requirements(
         "catalogue": _catalogue_context(catalogue),
     }
 
-    messages = [
-        {"role": "system", "content": INFER_SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(context)},
-    ]
+    # Single string input, like scheduling's parse_intent — the hosted-agent Responses
+    # endpoint rejects the chat-style [{role,content}, ...] list shape (400 invalid_value).
+    prompt = f"{INFER_SYSTEM_PROMPT}\n\nEvent and catalogue context (JSON):\n{json.dumps(context)}"
     started = time.monotonic()
     response = None
     items: list[InferredPackingItem] = []
     try:
         for _ in range(3):  # initial + 2 retries, like scheduling's parse_intent
-            response = await run_in_threadpool(agent_response, input=messages)
+            response = await run_in_threadpool(agent_response, input=prompt)
             try:
                 items = InferredPackingList.model_validate_json(
                     _extract_json(response.output_text)
@@ -172,16 +171,11 @@ async def suggest_alternatives(
 
     fallback = f"{resource.name} is short by {shortfall} for this window — check with the org's equipment desk."
 
+    prompt = f"{ALTERNATIVES_SYSTEM_PROMPT}\n\nContext (JSON):\n{json.dumps(context)}"
     started = time.monotonic()
     response = None
     try:
-        response = await run_in_threadpool(
-            agent_response,
-            input=[
-                {"role": "system", "content": ALTERNATIVES_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(context)},
-            ],
-        )
+        response = await run_in_threadpool(agent_response, input=prompt)
         return response.output_text.strip() or fallback
     except Exception:
         logger.warning("suggest_alternatives failed for resource=%s", resource.name, exc_info=True)

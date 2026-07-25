@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -243,10 +243,135 @@ async def get_org(db: AsyncSession) -> Organization | None:
     return await db.get(Organization, settings.org_id)
 
 
+async def list_members(db: AsyncSession) -> list[Member]:
+    return list(
+        (
+            await db.execute(
+                select(Member).where(Member.org_id == settings.org_id).order_by(Member.full_name)
+            )
+        ).scalars()
+    )
+
+
+# A member claimed by two overlapping events is the same conflict as a double-booked
+# resource — the one interval-overlap primitive, applied to people.
+_MEMBER_CONFLICT_QUERY = text(
+    """
+    SELECT m.id AS member_id, m.full_name AS member,
+           e1.id AS event_a_id, e1.title AS event_a,
+           e2.id AS event_b_id, e2.title AS event_b
+    FROM event_attendees a1
+    JOIN event_attendees a2 ON a2.member_id = a1.member_id AND a1.event_id < a2.event_id
+    JOIN events e1 ON e1.id = a1.event_id
+    JOIN events e2 ON e2.id = a2.event_id
+    JOIN members m ON m.id = a1.member_id
+    WHERE e1.org_id = :o AND e2.org_id = :o
+      AND e1.status IN ('confirmed', 'draft') AND e2.status IN ('confirmed', 'draft')
+      AND e1.start_utc < e2.end_utc AND e2.start_utc < e1.end_utc
+    ORDER BY e1.title, e2.title, m.full_name
+    """
+)
+
+
+async def list_member_conflicts(db: AsyncSession) -> list[dict]:
+    """Members double-booked across two overlapping (confirmed/draft) events."""
+    rows = await db.execute(_MEMBER_CONFLICT_QUERY, {"o": settings.org_id})
+    return [dict(r) for r in rows.mappings().all()]
+
+
+async def remove_attendees(db: AsyncSession, event_id: UUID, member_ids: list[UUID]) -> int:
+    """Drop members from an event — the one-click resolution for a double-booking.
+    Commits its own transaction (standalone action, nothing wraps it)."""
+    result = await db.execute(
+        delete(EventAttendee).where(
+            EventAttendee.event_id == event_id, EventAttendee.member_id.in_(member_ids)
+        )
+    )
+    await db.commit()
+    return result.rowcount or 0
+
+
+async def reschedule_event(db: AsyncSession, event_id: UUID) -> Event | None:
+    """Move an event to a new day to clear a double-booking, keeping every attendee.
+    Keeps the same time of day and walks forward to the first future day where none of
+    the attendees are committed to another event, preferring days with the fewest
+    personal (busy_block) clashes. Saves the new date to `events` and commits. Returns
+    None if no clear day exists in the horizon."""
+    event = await db.get(Event, event_id)
+    if event is None:
+        return None
+    duration = event.end_utc - event.start_utc
+
+    attendee_ids = list(
+        (
+            await db.execute(
+                select(EventAttendee.member_id).where(EventAttendee.event_id == event_id)
+            )
+        ).scalars()
+    )
+    if not attendee_ids:
+        return None
+
+    now = now_utc()
+    horizon = now + timedelta(days=28)
+    busy = [
+        (b.start_utc, b.end_utc)
+        for b in (
+            await db.execute(
+                select(BusyBlock).where(
+                    BusyBlock.member_id.in_(attendee_ids),
+                    BusyBlock.end_utc > now,
+                    BusyBlock.start_utc < horizon,
+                )
+            )
+        ).scalars()
+    ]
+    # Other events these attendees are on — the slots the reschedule must avoid.
+    other = [
+        (r.start_utc, r.end_utc)
+        for r in (
+            await db.execute(
+                select(Event.start_utc, Event.end_utc)
+                .join(EventAttendee, EventAttendee.event_id == Event.id)
+                .where(
+                    EventAttendee.member_id.in_(attendee_ids),
+                    Event.id != event_id,
+                    Event.end_utc > now,
+                    Event.start_utc < horizon,
+                    Event.status.in_(("confirmed", "draft", "rescheduled")),
+                )
+            )
+        ).all()
+    ]
+
+    best: tuple[datetime, datetime, int] | None = None
+    for day in range(1, 29):  # tomorrow .. 4 weeks out, same time of day
+        start = event.start_utc + timedelta(days=day)
+        end = start + duration
+        if start <= now:
+            continue
+        if any(overlaps(start, end, o_start, o_end) for o_start, o_end in other):
+            continue  # would just re-create a double-booking
+        clashes = sum(1 for b_start, b_end in busy if overlaps(start, end, b_start, b_end))
+        if best is None or clashes < best[2]:
+            best = (start, end, clashes)
+            if clashes == 0:
+                break  # a perfectly free day — take it
+
+    if best is None:
+        return None
+    event.start_utc, event.end_utc = best[0], best[1]
+    event.status = "rescheduled"
+    await db.commit()
+    await db.refresh(event)
+    return event
+
+
 async def calendar(
     db: AsyncSession, frm: datetime, to: datetime
-) -> tuple[list[Member], list[BusyBlock]]:
-    """Members + their busy blocks in [frm, to) — powers the per-member month calendar."""
+) -> tuple[list[Member], list[BusyBlock], list]:
+    """Members, their busy blocks, and the events they attend in [frm, to) — powers the
+    per-member month calendar."""
     members = list(
         (
             await db.execute(
@@ -266,7 +391,23 @@ async def calendar(
             )
         ).scalars()
     )
-    return members, blocks
+    events = list(
+        (
+            await db.execute(
+                select(
+                    EventAttendee.member_id, Event.title, Event.start_utc, Event.end_utc
+                )
+                .join(Event, Event.id == EventAttendee.event_id)
+                .where(
+                    Event.org_id == settings.org_id,
+                    Event.end_utc > frm,
+                    Event.start_utc < to,
+                    Event.status.in_(("confirmed", "draft", "rescheduled")),
+                )
+            )
+        ).all()
+    )
+    return members, blocks, events
 
 
 async def get_request(db: AsyncSession, request_id: UUID) -> SchedulingRequest | None:

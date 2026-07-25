@@ -117,6 +117,36 @@ def _build_busy_blocks(members) -> list[BusyBlock]:
     return blocks
 
 
+def _demo_conflicts(members) -> list[BusyBlock]:
+    """Deterministic, explainable member conflicts so /plan visibly steers around them
+    on stage (the random blocks above make the calendar realistic but aren't nameable):
+
+      * The exec board (treasurer + both execs) works Wed 14:00-18:00 SGT next week and
+        the week after — a SOFT conflict, so an exec meeting there scores low on
+        attendance and gets out-ranked.
+      * The president has an exam next-week Tuesday 10:00-12:00 — a HARD conflict
+        (kind='exam'), so any overlapping slot is eliminated outright.
+
+    Demo line: "the AI knows the board works Wednesday afternoons and the president has a
+    Tuesday exam, so it proposes a time when everyone's actually free."
+    """
+    base = _week_monday_local()
+    blocks: list[BusyBlock] = []
+    for m in members[1:4]:  # Ben (treasurer), Cara & Dan (execs)
+        for week in (1, 2):
+            s = base + timedelta(days=2 + 7 * week, hours=14)  # Wednesday 14:00 SGT
+            blocks.append(
+                BusyBlock(member_id=m.id, kind="work", start_utc=s,
+                          end_utc=s + timedelta(hours=4), weight=1, source="seed-demo")
+            )
+    exam = base + timedelta(days=1 + 7, hours=10)  # next-week Tuesday 10:00 SGT
+    blocks.append(
+        BusyBlock(member_id=members[0].id, kind="exam", start_utc=exam,  # Ava (president)
+                  end_utc=exam + timedelta(hours=2), weight=3, source="seed-demo")
+    )
+    return blocks
+
+
 def _build_past_events(org, roster, venue):
     """5 past completed events with RSVPs. The last two members are repeat no-shows so
     fairness debt (>=2 of last 5) fires in scheduling's scorer."""
@@ -246,6 +276,7 @@ async def seed() -> None:
             await db.flush()
 
             db.add_all(_build_busy_blocks(members))
+            db.add_all(_demo_conflicts(members))  # deterministic member conflicts for /plan
 
             past_events, rsvps = _build_past_events(org, members, venues[0])
 
@@ -343,8 +374,10 @@ async def seed() -> None:
         f"{len(past_events) + 2} events (5 past + 2 demo)\n"
         f"  resources:  {len(RESOURCES)} catalogue items, 4 reservations, 5 packing-list items\n"
         f"  finance:    1 budget ($5000), 2 event budgets, 7 line items, 2 expenses\n"
-        f"  demo conflict: 'Freshman Orientation Night' blocked on Projector by "
-        f"'AV Club Film Screening'"
+        f"  demo conflicts:\n"
+        f"    · resource — 'Freshman Orientation Night' blocked on Projector by 'AV Club Film Screening'\n"
+        f"    · finance  — 'Freshman Orientation Night' budget over its cap\n"
+        f"    · members  — exec board works Wed 14:00-18:00 next week; president has a Tue 10:00 exam"
     )
 
 

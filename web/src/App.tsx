@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import { getOrg } from "./api/scheduling";
-import { listConflicts } from "./api/resources";
-import { getFinanceSummary } from "./api/finance";
 import { Calendar } from "./pages/Calendar";
 import { Resources } from "./pages/Resources";
 import { Budget } from "./pages/Budget";
@@ -13,20 +11,12 @@ export function App() {
   const [tab, setTab] = useState<Tab>("Schedule");
   const [tz, setTz] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [org, setOrg] = useState<string>("");
-  const [caught, setCaught] = useState<number | null>(null);
 
   useEffect(() => {
     getOrg()
       .then((o) => {
         setTz(o.timezone);
         setOrg(o.name);
-      })
-      .catch(() => {});
-    // The headline: how many claims-over-a-limit SyncUp is holding back right now.
-    Promise.all([listConflicts().catch(() => []), getFinanceSummary().catch(() => null)])
-      .then(([conflicts, fin]) => {
-        const overCap = fin ? fin.events.filter((e) => e.over_cap).length : 0;
-        setCaught(conflicts.length + overCap);
       })
       .catch(() => {});
   }, []);
@@ -41,12 +31,12 @@ export function App() {
                 Organization Console
               </p>
           </div>
-          <div className="caught">
+          {/* <div className="caught">
             <b>{caught ?? "—"}</b>
             conflicts held back
             <br />
             before anyone committed
-          </div>
+          </div> */}
         </div>
 
         <nav className="nav" role="tablist" aria-label="Modules">

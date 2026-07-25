@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.features.scheduling import service
+from app.features.scheduling import agent, service
 from app.features.scheduling.schemas import (
     AvailabilityCell,
     AvailabilityOut,
@@ -16,7 +16,12 @@ from app.features.scheduling.schemas import (
     BusyOut,
     CalendarOut,
     EventAllocation,
+    EventBusyOut,
+    MemberConflictOut,
     MemberOut,
+    RecommendIn,
+    RecommendOut,
+    RemoveAttendeesIn,
     ConfirmIn,
     CreateRequestIn,
     CreateRequestOut,
@@ -78,18 +83,75 @@ async def get_org(db: AsyncSession = Depends(get_db)):
     return OrgOut(id=org.id, name=org.name, timezone=org.timezone)
 
 
+@router.get("/members", response_model=list[MemberOut])
+async def get_members(db: AsyncSession = Depends(get_db)):
+    return [
+        MemberOut(id=m.id, full_name=m.full_name, role=m.role)
+        for m in await service.list_members(db)
+    ]
+
+
+@router.get("/member-conflicts", response_model=list[MemberConflictOut])
+async def get_member_conflicts(db: AsyncSession = Depends(get_db)):
+    rows = await service.list_member_conflicts(db)
+    return [MemberConflictOut(**r) for r in rows]
+
+
+@router.post("/events/{event_id}/remove-attendees")
+async def remove_attendees(
+    event_id: UUID, body: RemoveAttendeesIn, db: AsyncSession = Depends(get_db)
+) -> dict:
+    removed = await service.remove_attendees(db, event_id, body.member_ids)
+    return {"removed": removed}
+
+
+@router.post("/member-conflicts/recommend", response_model=RecommendOut)
+async def recommend_resolution(body: RecommendIn) -> RecommendOut:
+    text = await agent.recommend_member_resolution(body.event_a, body.event_b, body.members)
+    return RecommendOut(recommendation=text)
+
+
+@router.post("/events/{event_id}/reschedule", response_model=EventListItem)
+async def reschedule_event(event_id: UUID, db: AsyncSession = Depends(get_db)):
+    event = await service.reschedule_event(db, event_id)
+    if event is None:
+        raise HTTPException(
+            409, detail={"detail": "No conflict-free day found to move it to", "code": "no_slot"}
+        )
+    members, items = await service.event_details(db, event.id)
+    return EventListItem(
+        id=event.id,
+        title=event.title,
+        start_utc=event.start_utc,
+        end_utc=event.end_utc,
+        status=event.status,
+        venue_id=event.venue_id,
+        members=members,
+        items=[
+            EventAllocation(item_name=i.item_name, quantity=i.quantity, org_owned=i.org_owned)
+            for i in items
+        ],
+    )
+
+
 @router.get("/calendar", response_model=CalendarOut)
 async def get_calendar(
     frm: datetime = Query(alias="from"),
     to: datetime = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    members, blocks = await service.calendar(db, frm, to)
+    members, blocks, events = await service.calendar(db, frm, to)
     return CalendarOut(
         members=[MemberOut(id=m.id, full_name=m.full_name, role=m.role) for m in members],
         busy=[
             BusyOut(member_id=b.member_id, kind=b.kind, start_utc=b.start_utc, end_utc=b.end_utc)
             for b in blocks
+        ],
+        events=[
+            EventBusyOut(
+                member_id=r.member_id, title=r.title, start_utc=r.start_utc, end_utc=r.end_utc
+            )
+            for r in events
         ],
     )
 

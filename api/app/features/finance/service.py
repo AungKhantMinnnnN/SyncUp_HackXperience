@@ -8,7 +8,7 @@ from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+from sqlalchemy import Date, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time import now_utc
@@ -68,10 +68,10 @@ async def _current_budget(db: AsyncSession, org_id: UUID) -> Budget | None:
 
 async def _committed_and_actual(db: AsyncSession, budget_id: UUID) -> tuple[Decimal, Decimal]:
     """Shared by draft_for_event, regenerate, and get_headroom so the semester math
-    never drifts out of sync between them.
-
-    Raw SQL against `events` on purpose — finance never imports scheduling's ORM
-    model (import-direction rule)."""
+    never drifts out of sync between them."""
+    # committed: joins scheduling's `events` (to exclude budgets of cancelled/completed
+    # events) — kept as raw SQL, the same cross-module read pattern resources uses,
+    # since finance must not import scheduling's ORM model (one-way import rule).
     committed = Decimal(
         (
             await db.execute(
@@ -89,19 +89,16 @@ async def _committed_and_actual(db: AsyncSession, budget_id: UUID) -> tuple[Deci
             )
         ).scalar_one()
     )
+    # actual: finance-only tables -> ORM.
     actual = Decimal(
         (
             await db.execute(
-                text(
-                    """
-                    SELECT COALESCE(SUM(ex.amount), 0)
-                    FROM expenses ex
-                    JOIN event_budgets eb ON eb.id = ex.event_budget_id
-                    WHERE eb.budget_id = :budget_id
-                      AND ex.status IN ('approved', 'reimbursed')
-                    """
-                ),
-                {"budget_id": budget_id},
+                select(func.coalesce(func.sum(Expense.amount), 0))
+                .join(EventBudget, EventBudget.id == Expense.event_budget_id)
+                .where(
+                    EventBudget.budget_id == budget_id,
+                    Expense.status.in_(("approved", "reimbursed")),
+                )
             )
         ).scalar_one()
     )
@@ -283,6 +280,20 @@ async def get_lines(db: AsyncSession, event_budget_id: UUID) -> list[BudgetLineI
     ).scalars().all()
 
 
+async def list_event_budgets(db: AsyncSession, org_id: UUID) -> list[dict]:
+    """(event_budget id, event title, status, estimated_total) for the org — backs the
+    bot's budget picker (autocomplete for /budget approve and /expense)."""
+    rows = await db.execute(
+        text(
+            "SELECT eb.id, e.title, eb.status, eb.estimated_total "
+            "FROM event_budgets eb JOIN events e ON e.id = eb.event_id "
+            "WHERE e.org_id = :o ORDER BY e.start_utc DESC"
+        ),
+        {"o": org_id},
+    )
+    return [dict(r) for r in rows.mappings().all()]
+
+
 async def get_event_budget(
     db: AsyncSession, event_id: UUID
 ) -> tuple[EventBudget, list[BudgetLineItem]] | None:
@@ -343,8 +354,10 @@ async def regenerate(db: AsyncSession, event_id: UUID) -> RegeneratedDraft:
             for l in old_lines
             if l.category == "equipment_rental"
         ]
-        if old_eb.status == "draft":
-            old_eb.status = "cancelled"  # superseded, not deleted — keeps any logged expenses intact
+        if old_eb.status in ("draft", "approved", "reconciling"):
+            # Supersede any live budget (not just drafts) so its estimated_total stops
+            # counting toward `committed` — i.e. the previous allocation is released.
+            old_eb.status = "cancelled"
 
     event = EventView(
         id=row["id"],
@@ -360,6 +373,17 @@ async def regenerate(db: AsyncSession, event_id: UUID) -> RegeneratedDraft:
 
     await draft_for_event(db, event, plan)
     new_eb, new_lines = await get_event_budget(db, event_id)
+
+    # Carry the event's real expenses onto the fresh budget and re-match them to the new
+    # line items, so `actual` and the Estimate-vs-Actual report follow the regenerated
+    # plan rather than the superseded one.
+    if previous is not None:
+        moved = (
+            await db.execute(select(Expense).where(Expense.event_budget_id == previous[0].id))
+        ).scalars().all()
+        for ex in moved:
+            ex.event_budget_id = new_eb.id
+            ex.line_item_id = await _match_line_item(db, new_eb.id, ex.description or "")
 
     budget_row = await db.get(Budget, new_eb.budget_id)
     committed, actual = await _committed_and_actual(db, budget_row.id)
@@ -447,29 +471,24 @@ async def get_burndown(db: AsyncSession, org_id: UUID, semester: str):
 
     committed_rows = (
         await db.execute(
-            text(
-                """
-                SELECT eb.created_at::date AS d, eb.estimated_total AS amt
-                FROM event_budgets eb
-                WHERE eb.budget_id = :b AND eb.status = 'approved'
-                ORDER BY eb.created_at
-                """
-            ),
-            {"b": budget_row.id},
+            select(
+                cast(EventBudget.created_at, Date).label("d"),
+                EventBudget.estimated_total.label("amt"),
+            )
+            .where(EventBudget.budget_id == budget_row.id, EventBudget.status == "approved")
+            .order_by(EventBudget.created_at)
         )
     ).all()
+    _spent_day = cast(func.coalesce(Expense.spent_at, Expense.created_at), Date)
     actual_rows = (
         await db.execute(
-            text(
-                """
-                SELECT COALESCE(ex.spent_at, ex.created_at)::date AS d, ex.amount AS amt
-                FROM expenses ex
-                JOIN event_budgets eb ON eb.id = ex.event_budget_id
-                WHERE eb.budget_id = :b AND ex.status IN ('approved', 'reimbursed')
-                ORDER BY d
-                """
-            ),
-            {"b": budget_row.id},
+            select(_spent_day.label("d"), Expense.amount.label("amt"))
+            .join(EventBudget, EventBudget.id == Expense.event_budget_id)
+            .where(
+                EventBudget.budget_id == budget_row.id,
+                Expense.status.in_(("approved", "reimbursed")),
+            )
+            .order_by(_spent_day)
         )
     ).all()
 

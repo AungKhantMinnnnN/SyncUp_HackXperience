@@ -62,6 +62,35 @@ async def parse_intent(
     raise ValueError(f"parse_intent failed after retries: {last_err}")
 
 
+_RESOLVE_INSTRUCTIONS = """\
+You are SyncUp's scheduling assistant. Some members are double-booked — they are
+attendees of two events that overlap in time. Recommend the single best way to resolve
+it in 1-2 short, concrete sentences. Prefer rescheduling the less time-critical event to
+a different day (name which one to move) so nobody has to be dropped; only suggest
+removing members from an event if rescheduling clearly isn't sensible. Do not invent
+facts beyond what is given.
+
+Event A: {event_a}
+Event B: {event_b}
+Double-booked members: {members}"""
+
+
+async def recommend_member_resolution(event_a: str, event_b: str, members: list[str]) -> str:
+    """LLM advice on resolving a double-booking. Falls back to a generic, honest tip."""
+    instructions = _RESOLVE_INSTRUCTIONS.format(
+        event_a=event_a, event_b=event_b, members=", ".join(members)
+    )
+    fallback = (
+        f"Drop {', '.join(members)} from whichever event they're optional for, "
+        "or move one event to a non-overlapping time."
+    )
+    try:
+        resp = await run_in_threadpool(agent_response, input=instructions)
+        return resp.output_text.strip() or fallback
+    except Exception:  # noqa: BLE001 — LLM unreachable; honest fallback
+        return fallback
+
+
 def explain_ranking(proposals) -> str:
     """Human-readable rationale for the top slots. ponytail: templated, no LLM — doc §8
     says this is cosmetic only. Swap for an LLM call in Phase 21-24 if the demo wants

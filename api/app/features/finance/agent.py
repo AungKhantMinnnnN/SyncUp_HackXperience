@@ -83,20 +83,19 @@ class SuggestedCutList(BaseModel):
     cuts: list[SuggestedCut]
 
 
-def _json_schema_format(model: type[BaseModel], name: str) -> dict:
-    """Wrap a Pydantic model's JSON schema for the Responses API `text=` param."""
-    return {
-        "format": {
-            "type": "json_schema",
-            "name": name,
-            "strict": True,
-            "schema": model.model_json_schema(),
-        }
-    }
-
-
-drafted_line_list_schema = _json_schema_format(DraftedLineList, "drafted_line_list")
-suggested_cut_list_schema = _json_schema_format(SuggestedCutList, "suggested_cut_list")
+# The hosted-agent Responses endpoint rejects the `text=` structured-output param
+# ("Not allowed when agent is specified"), so we ask for JSON in the prompt and parse
+# it — same approach as scheduling.parse_intent and resources.infer_requirements.
+_DRAFT_SCHEMA_HINT = (
+    "Return ONLY this JSON object — no prose, no markdown fence:\n"
+    '{"lines": [{"category": "food|venue|equipment_rental|printing|materials|transport|'
+    'contingency", "description": string, "unit_cost": number, "quantity": integer}]}'
+)
+_CUTS_SCHEMA_HINT = (
+    "Return ONLY this JSON object — no prose, no markdown fence:\n"
+    '{"cuts": [{"description": string, "category": "food|venue|equipment_rental|printing|'
+    'materials|transport|contingency", "estimated_savings": number, "rationale": string}]}'
+)
 
 
 def _extract_json(text: str) -> str:
@@ -106,27 +105,22 @@ def _extract_json(text: str) -> str:
 
 
 async def _call_agent(
-    messages: list[dict],
-    schema: dict,
-    *,
-    feature: str,
-    db: AsyncSession | None,
-    org_id: UUID | None,
+    prompt: str, *, feature: str, db: AsyncSession | None, org_id: UUID | None
 ):
-    """One call to the hosted agent via app.core.llm.agent_response, logged to
-    ai_interactions regardless of outcome (try/finally)."""
+    """One call to the hosted agent via app.core.llm.agent_response (string input, no
+    `text=` — the agent path forbids it), logged to ai_interactions regardless of
+    outcome (try/finally)."""
     t0 = time.monotonic()
     resp = None
     try:
-        resp = await run_in_threadpool(agent_response, input=messages, text=schema)
+        resp = await run_in_threadpool(agent_response, input=prompt)
         return resp
     finally:
         if db is not None:
-            usage = getattr(resp, "usage", None) if resp is not None else None
             log_interaction(
                 db,
                 feature=feature,
-                prompt=messages,
+                prompt=prompt,
                 resp=resp,
                 latency_ms=int((time.monotonic() - t0) * 1000),
                 org_id=org_id,
@@ -134,8 +128,7 @@ async def _call_agent(
 
 
 async def _call_with_retry(
-    messages: list[dict],
-    schema: dict,
+    prompt: str,
     model_cls: type[BaseModel],
     *,
     feature: str,
@@ -146,22 +139,17 @@ async def _call_with_retry(
     FinanceAgentError. Never patches bad JSON (CLAUDE.md rule)."""
     last_err: Exception | None = None
     for attempt in range(_MAX_ATTEMPTS):
-        resp = await _call_agent(messages, schema, feature=feature, db=db, org_id=org_id)
+        resp = await _call_agent(prompt, feature=feature, db=db, org_id=org_id)
         try:
             return model_cls.model_validate_json(_extract_json(resp.output_text))
         except (ValidationError, AttributeError, ValueError) as e:
             last_err = e
             if attempt < _MAX_ATTEMPTS - 1:
-                messages = messages + [
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your previous response failed schema validation "
-                            f"with this error: {e}. Return ONLY a JSON object matching "
-                            "the schema — no prose, no markdown fence."
-                        ),
-                    }
-                ]
+                prompt = (
+                    prompt
+                    + f"\n\nYour previous response failed validation with: {e}. "
+                    "Return ONLY a JSON object matching the schema — no prose, no markdown fence."
+                )
     raise FinanceAgentError(f"finance agent failed after retry: {last_err}")
 
 
@@ -189,11 +177,11 @@ subtotal, or contingency; a separate deterministic step handles all arithmetic.
 
 Rules:
 - Every item in "Unowned items" below MUST become its own line in category \
-  "equipment_rental" — price it, do not invent a different item for it, and do not \
-  drop it.
+"equipment_rental" — price it, do not invent a different item for it, and do not \
+drop it.
 - For any category with an observed historical average price, anchor your unit_cost \
-  close to that average — it reflects this org's real vendor/campus prices. Only use \
-  a general-knowledge default when a category shows "no history".
+close to that average — it reflects this org's real vendor/campus prices. Only use \
+a general-knowledge default when a category shows "no history".
 - Scale food quantity to the event's expected_attendance if given.
 - Do not include a "contingency" line — that is added automatically afterward.
 - Return ONLY a JSON object matching the schema — no prose, no markdown fence."""
@@ -221,18 +209,9 @@ Unowned items (from the resources module — price each one, do not add or drop 
 Historical per-category prices for this org (anchor to these when present):
 {_priors_line(priors)}"""
 
-    messages = [
-        {"role": "system", "content": _DRAFT_SYSTEM},
-        {"role": "user", "content": user_content},
-    ]
-
+    prompt = f"{_DRAFT_SYSTEM}\n\n{_DRAFT_SCHEMA_HINT}\n\n{user_content}"
     result = await _call_with_retry(
-        messages,
-        drafted_line_list_schema,
-        DraftedLineList,
-        feature="finance",
-        db=db,
-        org_id=org_id,
+        prompt, DraftedLineList, feature="finance", db=db, org_id=org_id
     )
     return result.lines
 
@@ -246,7 +225,7 @@ you only propose ranked, explained suggestions.
 Rules:
 - Never suggest cutting more than a line's own line_total (unit_cost * quantity).
 - Prefer suggesting reductions to food/materials/printing quantity over cutting \
-  equipment_rental for items the org does not own, since those are often required.
+equipment_rental for items the org does not own, since those are often required.
 - Return ONLY a JSON object matching the schema — no prose, no markdown fence."""
 
 
@@ -274,17 +253,8 @@ Current line items:
 Overage: ${overage} over the allowed budget. Suggest ranked cuts totaling at least \
 this amount if possible."""
 
-    messages = [
-        {"role": "system", "content": _CUTS_SYSTEM},
-        {"role": "user", "content": user_content},
-    ]
-
+    prompt = f"{_CUTS_SYSTEM}\n\n{_CUTS_SCHEMA_HINT}\n\n{user_content}"
     result = await _call_with_retry(
-        messages,
-        suggested_cut_list_schema,
-        SuggestedCutList,
-        feature="finance",
-        db=db,
-        org_id=org_id,
+        prompt, SuggestedCutList, feature="finance", db=db, org_id=org_id
     )
     return result.cuts
