@@ -11,11 +11,14 @@ from pydantic import BaseModel
 
 
 class Constraints(BaseModel):
-    """LLM output — validated, never trusted for numbers. Fields per doc §8."""
+    """LLM output — validated, never trusted for numbers. Fields per doc §8.
 
-    duration_minutes: int
-    window_start: datetime
-    window_end: datetime
+    All fields are optional so a vague request ("plan a 3h hiking trip") still parses;
+    service.py fills sensible defaults (duration 60m, window = next 14 days)."""
+
+    duration_minutes: int | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
     attendee_group: str | None = None
     must_be_before: datetime | None = None
     preferred_time_of_day: str | None = None

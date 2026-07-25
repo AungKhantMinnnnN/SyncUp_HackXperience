@@ -18,10 +18,14 @@ _PARSE_INSTRUCTIONS = """\
 You extract scheduling constraints from an organizer's request. The current UTC time is
 {now}. Resolve relative dates ("next week", "before Friday") against it.
 
+Every field is optional — use null for anything the request doesn't state. Do NOT
+invent a date range when none is implied; leave window_start/window_end null and the
+system will search a sensible default window.
+
 Return ONLY a JSON object with these keys (no prose, no markdown fence):
-  duration_minutes: integer
-  window_start: ISO-8601 UTC datetime (earliest the meeting could start)
-  window_end: ISO-8601 UTC datetime (latest it could end)
+  duration_minutes: integer or null (e.g. "3 hour" -> 180)
+  window_start: ISO-8601 UTC datetime or null (earliest it could start)
+  window_end: ISO-8601 UTC datetime or null (latest it could end)
   attendee_group: string or null (e.g. "exec", "all members")
   must_be_before: ISO-8601 UTC datetime or null
   preferred_time_of_day: string or null (e.g. "evening")

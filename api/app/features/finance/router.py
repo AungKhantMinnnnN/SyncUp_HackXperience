@@ -102,7 +102,7 @@ async def summary(db: AsyncSession = Depends(get_db)) -> dict:
             "over_cap": cap is not None and eb["estimated_total"] > cap,
             "line_items": [
                 {"category": ln["category"], "description": ln["description"],
-                 "line_total": str(ln["line_total"])}
+                "line_total": str(ln["line_total"])}
                 for ln in lines
             ],
         })

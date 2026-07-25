@@ -1,20 +1,14 @@
-"""One-shot demo seed for ALL three modules — run once, demo everything.
-
-Deterministic (fixed per-member RNG) and idempotent (TRUNCATE ... CASCADE then insert),
-so re-running resets to the exact same state. Single org, pinned to settings.org_id.
-
+"""
 Populates:
-  scheduling  — 1 org, 10 members, 4 venues, ~130 busy_blocks (SGT daytime, 3 weeks),
+scheduling  — 1 org, 10 members, 4 venues, ~130 busy_blocks (SGT daytime, 3 weeks),
                 5 past completed events (with RSVPs incl. repeat no-shows -> fairness
                 debt), and 2 overlapping upcoming events for the resource conflict demo.
-  resources   — ~15 catalogue items; reservations that make "Film Screening" hold the
+resources   — ~15 catalogue items; reservations that make "Film Screening" hold the
                 projector while "Orientation Night" (same window) is blocked; packing
                 lists for Orientation Night (owned + unowned items).
-  finance     — a semester budget, per-event budgets (one over cap), itemized line
+finance     — a semester budget, per-event budgets (one over cap), itemized line
                 items, and a couple of expenses. Written via raw SQL because finance's
                 ORM models don't exist yet (Member C) — the tables do (schema.sql).
-
-Run:  python scripts/seed.py   (against the DEV Supabase project only)
 """
 
 import asyncio
@@ -118,18 +112,6 @@ def _build_busy_blocks(members) -> list[BusyBlock]:
 
 
 def _demo_conflicts(members) -> list[BusyBlock]:
-    """Deterministic, explainable member conflicts so /plan visibly steers around them
-    on stage (the random blocks above make the calendar realistic but aren't nameable):
-
-      * The exec board (treasurer + both execs) works Wed 14:00-18:00 SGT next week and
-        the week after — a SOFT conflict, so an exec meeting there scores low on
-        attendance and gets out-ranked.
-      * The president has an exam next-week Tuesday 10:00-12:00 — a HARD conflict
-        (kind='exam'), so any overlapping slot is eliminated outright.
-
-    Demo line: "the AI knows the board works Wednesday afternoons and the president has a
-    Tuesday exam, so it proposes a time when everyone's actually free."
-    """
     base = _week_monday_local()
     blocks: list[BusyBlock] = []
     for m in members[1:4]:  # Ben (treasurer), Cara & Dan (execs)
@@ -137,19 +119,17 @@ def _demo_conflicts(members) -> list[BusyBlock]:
             s = base + timedelta(days=2 + 7 * week, hours=14)  # Wednesday 14:00 SGT
             blocks.append(
                 BusyBlock(member_id=m.id, kind="work", start_utc=s,
-                          end_utc=s + timedelta(hours=4), weight=1, source="seed-demo")
+                        end_utc=s + timedelta(hours=4), weight=1, source="seed-demo")
             )
     exam = base + timedelta(days=1 + 7, hours=10)  # next-week Tuesday 10:00 SGT
     blocks.append(
         BusyBlock(member_id=members[0].id, kind="exam", start_utc=exam,  # Ava (president)
-                  end_utc=exam + timedelta(hours=2), weight=3, source="seed-demo")
+                end_utc=exam + timedelta(hours=2), weight=3, source="seed-demo")
     )
     return blocks
 
 
 def _build_past_events(org, roster, venue):
-    """5 past completed events with RSVPs. The last two members are repeat no-shows so
-    fairness debt (>=2 of last 5) fires in scheduling's scorer."""
     base = _week_monday_local()
     events: list[Event] = []
     rsvps: list[tuple[Event, Member, str]] = []
@@ -191,8 +171,8 @@ async def _seed_finance(
             "VALUES (:id, :event_id, :budget_id, :est, :actual, :cap, :status)"
         ),
         {"id": eb_a, "event_id": event_a.id, "budget_id": budget_id,
-         "est": Decimal("300.00"), "actual": Decimal("250.00"),
-         "cap": Decimal("400.00"), "status": "approved"},
+            "est": Decimal("300.00"), "actual": Decimal("250.00"),
+            "cap": Decimal("400.00"), "status": "approved"},
     )
     await db.execute(
         text(
@@ -201,8 +181,8 @@ async def _seed_finance(
             "VALUES (:id, :event_id, :budget_id, :est, :actual, :cap, :status)"
         ),
         {"id": eb_b, "event_id": event_b.id, "budget_id": budget_id,
-         "est": Decimal("1200.00"), "actual": Decimal("640.00"),
-         "cap": Decimal("1000.00"), "status": "approved"},  # est > cap => over_cap verdict
+            "est": Decimal("1200.00"), "actual": Decimal("640.00"),
+            "cap": Decimal("1000.00"), "status": "approved"},  # est > cap => over_cap verdict
     )
 
     # (event_budget_id, category, description, unit_cost, quantity)
@@ -238,7 +218,7 @@ async def _seed_finance(
             "VALUES (:id, :eb, :li, :paid_by, :amt, :desc, :status, :spent)"
         ),
         {"id": uuid4(), "eb": eb_b, "li": first_food_line, "paid_by": treasurer_id,
-         "amt": Decimal("600.00"), "desc": "Catering deposit", "status": "approved", "spent": spent},
+            "amt": Decimal("600.00"), "desc": "Catering deposit", "status": "approved", "spent": spent},
     )
     await db.execute(
         text(
@@ -247,7 +227,7 @@ async def _seed_finance(
             "VALUES (:id, :eb, NULL, :paid_by, :amt, :desc, :status, :spent)"
         ),
         {"id": uuid4(), "eb": eb_b, "paid_by": treasurer_id,
-         "amt": Decimal("40.00"), "desc": "Printing (pending)", "status": "pending", "spent": spent},
+            "amt": Decimal("40.00"), "desc": "Printing (pending)", "status": "pending", "spent": spent},
     )
 
 
@@ -308,12 +288,12 @@ async def seed() -> None:
             # Attendees for the two upcoming demo events.
             db.add_all(
                 EventAttendee(event_id=orientation.id, member_id=m.id,
-                              required=(m.role != "member"), rsvp_status="attending")
+                            required=(m.role != "member"), rsvp_status="attending")
                 for m in members
             )
             db.add_all(
                 EventAttendee(event_id=film.id, member_id=m.id,
-                              required=(m.role != "member"), rsvp_status="attending")
+                            required=(m.role != "member"), rsvp_status="attending")
                 for m in members[:5]
             )
 

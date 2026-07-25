@@ -4,9 +4,10 @@ Import direction: scheduling MAY import resources + finance. They must never imp
 The only layer that writes to the DB.
 """
 
+import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -14,7 +15,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.time import overlaps
+from app.core.time import now_utc, overlaps
 from app.core.types import BudgetDraft, EventView, ReservationPlan
 from app.features.finance import service as finance_service
 from app.features.resources import service as resources_service
@@ -37,6 +38,18 @@ from app.models.scheduling import (
 
 _LEADERSHIP = {"president", "exec", "treasurer"}
 _GROUP_KEYWORDS = ("exec", "board", "lead", "officer", "president")
+
+
+def _extract_duration(prompt: str) -> int | None:
+    """Deterministic duration from the prompt as a backup when the LLM returns null
+    (e.g. '3 hour' -> 180, '90 minutes' -> 90, '1.5 hrs' -> 90). Python decides numbers."""
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b", prompt, re.IGNORECASE)
+    if m:
+        return int(float(m.group(1)) * 60)
+    m = re.search(r"(\d+)\s*(minutes?|mins?)\b", prompt, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return None
 
 
 def _required_ids(members: list[Member], group: str | None) -> set[UUID]:
@@ -97,6 +110,15 @@ async def create_request(
     req.parsed_constraints = constraints.model_dump(mode="json")
     req.status = "proposing"
 
+    # Fill defaults for anything the request didn't pin down, so vague prompts still
+    # produce proposals (e.g. "plan a 3h hiking trip" with no date → search 14 days).
+    now = now_utc()
+    win_start = constraints.window_start or now
+    win_end = constraints.window_end or (win_start + timedelta(days=14))
+    if win_end <= win_start:
+        win_end = win_start + timedelta(days=14)
+    duration = constraints.duration_minutes or _extract_duration(prompt) or 60
+
     members = list((await db.execute(select(Member).where(Member.org_id == org_id))).scalars())
     required = _required_ids(members, constraints.attendee_group)
     member_views = [
@@ -108,8 +130,8 @@ async def create_request(
         await db.execute(
             select(BusyBlock).where(
                 BusyBlock.member_id.in_(member_ids),
-                BusyBlock.end_utc > constraints.window_start,
-                BusyBlock.start_utc < constraints.window_end,
+                BusyBlock.end_utc > win_start,
+                BusyBlock.start_utc < win_end,
             )
         )
     ).scalars()
@@ -131,8 +153,8 @@ async def create_request(
                 select(Event).where(
                     Event.org_id == org_id,
                     Event.status.in_(("confirmed", "draft")),
-                    Event.end_utc > constraints.window_start,
-                    Event.start_utc < constraints.window_end,
+                    Event.end_utc > win_start,
+                    Event.start_utc < win_end,
                 )
             )
         ).scalars()
@@ -140,9 +162,9 @@ async def create_request(
 
     slots = score_slots(
         ScoringConstraints(
-            duration_minutes=constraints.duration_minutes,
-            window_start=constraints.window_start,
-            window_end=constraints.window_end,
+            duration_minutes=duration,
+            window_start=win_start,
+            window_end=win_end,
             must_be_before=constraints.must_be_before,
         ),
         member_views,
@@ -312,7 +334,7 @@ async def reschedule_event(db: AsyncSession, event_id: UUID) -> Event | None:
     if not attendee_ids:
         return None
 
-    now = now_utc()
+    now = datetime.now(timezone.utc)
     horizon = now + timedelta(days=28)
     busy = [
         (b.start_utc, b.end_utc)

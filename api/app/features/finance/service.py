@@ -1,8 +1,3 @@
-"""Finance service (Member C). Never imports scheduling — receives EventView, the
-shared cross-module contract type, instead. Never commits inside draft_for_event();
-scheduling owns that transaction. Money is Decimal everywhere.
-"""
-
 import difflib
 from datetime import timedelta
 from decimal import Decimal
@@ -25,8 +20,8 @@ _CATEGORIES = (
     "transport",
     "contingency",
 )
-_PRIOR_WINDOW_DAYS = 365  # doc §5: "last 12 months"
-_MATCH_THRESHOLD = 0.35  # log_expense: minimum similarity to accept a line-item match
+_PRIOR_WINDOW_DAYS = 365  
+_MATCH_THRESHOLD = 0.35  
 
 
 class NoSemesterBudget(Exception):
@@ -69,9 +64,6 @@ async def _current_budget(db: AsyncSession, org_id: UUID) -> Budget | None:
 async def _committed_and_actual(db: AsyncSession, budget_id: UUID) -> tuple[Decimal, Decimal]:
     """Shared by draft_for_event, regenerate, and get_headroom so the semester math
     never drifts out of sync between them."""
-    # committed: joins scheduling's `events` (to exclude budgets of cancelled/completed
-    # events) — kept as raw SQL, the same cross-module read pattern resources uses,
-    # since finance must not import scheduling's ORM model (one-way import rule).
     committed = Decimal(
         (
             await db.execute(
@@ -81,8 +73,8 @@ async def _committed_and_actual(db: AsyncSession, budget_id: UUID) -> tuple[Deci
                     FROM event_budgets eb
                     JOIN events e ON e.id = eb.event_id
                     WHERE eb.status = 'approved'
-                      AND e.status IN ('draft', 'confirmed')
-                      AND eb.budget_id = :budget_id
+                        AND e.status IN ('draft', 'confirmed')
+                        AND eb.budget_id = :budget_id
                     """
                 ),
                 {"budget_id": budget_id},
@@ -106,19 +98,6 @@ async def _committed_and_actual(db: AsyncSession, budget_id: UUID) -> tuple[Deci
 
 
 async def draft_for_event(db: AsyncSession, event: EventView, plan: ReservationPlan) -> BudgetDraft:
-    """Called by scheduling inside its confirm transaction (doc §6). Drafts an itemized
-    budget, checks it against the semester allocation, persists a draft event_budget +
-    line items.
-
-    MUST NOT call db.commit() or db.rollback() — only db.flush() for generated IDs.
-    Scheduling owns the transaction; if a later step (e.g. an unrelated failure) rolls
-    back, this draft rolls back with it rather than leaving an orphaned budget.
-
-    Returns app.core.types.BudgetDraft exactly as scheduling expects it — 4 fields
-    only. Do NOT add remaining/suggested_cuts here; that broke every caller of this
-    function last time. The richer, API-facing schemas.BudgetDraft is assembled by
-    the router/regenerate(), never by this function.
-    """
     priors = await _historical_unit_cost(db, event.org_id)
     cap = getattr(plan, "stated_cap", None)  # ReservationPlan carries no cap field yet
 
@@ -126,7 +105,6 @@ async def draft_for_event(db: AsyncSession, event: EventView, plan: ReservationP
         event, plan.unowned_items, priors, cap, db=db, org_id=event.org_id
     )
 
-    # Never trust a total from the model — every number below is Python Decimal math.
     line_totals = [headroom.line_total(d.unit_cost, d.quantity) for d in drafted]
     subtotal = headroom.subtotal(line_totals)
     estimated_total = headroom.estimated_total(subtotal)
@@ -164,21 +142,11 @@ async def draft_for_event(db: AsyncSession, event: EventView, plan: ReservationP
         event_budget_id=event_budget.id,
         estimated_total=estimated_total,
         stated_cap=cap,
-        verdict="draft",  # headroom is checked by the caller (see get_headroom/regenerate) —
-                          # draft_for_event's own contract has no verdict field to fill from
-                          # a live check without also computing committed/actual here, which
-                          # would duplicate work the caller (scheduling) already needs anyway.
+        verdict="draft",
     )
 
 
 async def approve(db: AsyncSession, budget_id: UUID, actor_id: UUID) -> EventBudget:
-    """Approve a draft budget, committing it against the semester allocation. Unlike
-    draft_for_event, this entry point owns its own transaction.
-
-    `actor_id` is accepted for an eventual approval audit trail — schema.sql has no
-    `approved_by` column yet, so it isn't persisted. Flag for a future migration if
-    that's needed.
-    """
     event_budget = await db.get(EventBudget, budget_id)
     if event_budget is None:
         raise LookupError(f"event_budget {budget_id} not found")
@@ -193,10 +161,6 @@ async def approve(db: AsyncSession, budget_id: UUID, actor_id: UUID) -> EventBud
 
 
 async def _match_line_item(db: AsyncSession, event_budget_id: UUID, description: str) -> UUID | None:
-    """Best-effort match: closest unmatched budget_line_item by description/category
-    similarity. Returns None rather than guessing when nothing clears the threshold —
-    an unmatched expense is a normal, reconcilable outcome; a wrong match would
-    silently corrupt the itemized budget."""
     candidates = (
         await db.execute(
             select(BudgetLineItem).where(BudgetLineItem.event_budget_id == event_budget_id)
@@ -323,14 +287,6 @@ class RegeneratedDraft:
 
 
 async def regenerate(db: AsyncSession, event_id: UUID) -> RegeneratedDraft:
-    """Re-draft an event's budget on demand (outside scheduling's confirm
-    transaction). Owns its own commit.
-
-    Limitation: finance has no way to re-fetch the live resources plan after the
-    fact without importing resources/scheduling, which the import-direction rule
-    forbids. It reuses the previous draft's equipment_rental lines as the
-    "unowned items" list and re-prices everything against current priors.
-    """
     row = (
         await db.execute(
             text(
@@ -355,8 +311,6 @@ async def regenerate(db: AsyncSession, event_id: UUID) -> RegeneratedDraft:
             if l.category == "equipment_rental"
         ]
         if old_eb.status in ("draft", "approved", "reconciling"):
-            # Supersede any live budget (not just drafts) so its estimated_total stops
-            # counting toward `committed` — i.e. the previous allocation is released.
             old_eb.status = "cancelled"
 
     event = EventView(
@@ -374,9 +328,6 @@ async def regenerate(db: AsyncSession, event_id: UUID) -> RegeneratedDraft:
     await draft_for_event(db, event, plan)
     new_eb, new_lines = await get_event_budget(db, event_id)
 
-    # Carry the event's real expenses onto the fresh budget and re-match them to the new
-    # line items, so `actual` and the Estimate-vs-Actual report follow the regenerated
-    # plan rather than the superseded one.
     if previous is not None:
         moved = (
             await db.execute(select(Expense).where(Expense.event_budget_id == previous[0].id))
@@ -407,10 +358,6 @@ async def regenerate(db: AsyncSession, event_id: UUID) -> RegeneratedDraft:
     return RegeneratedDraft(new_eb, new_lines, result.verdict, result.after, suggested_cuts)
 
 async def get_verdict(db: AsyncSession, event_budget: EventBudget) -> headroom.Headroom:
-    """Live headroom check for an existing event_budget, without re-drafting.
-    Used by the /budget draft bot command's cached-read path (an already-drafted
-    budget has no stored verdict — draft_for_event doesn't compute one by design;
-    see the note on that function)."""
     budget_row = await db.get(Budget, event_budget.budget_id)
     committed, actual = await _committed_and_actual(db, budget_row.id)
     return headroom.check(budget_row.total_allocated, committed, actual, event_budget.estimated_total)
@@ -418,9 +365,6 @@ async def get_verdict(db: AsyncSession, event_budget: EventBudget) -> headroom.H
 async def patch_line_item(
     db: AsyncSession, budget_id: UUID, line_id: UUID, fields: dict
 ) -> BudgetLineItem:
-    """Apply only the fields present in `fields` (router passes model_dump(exclude_unset=True)).
-    Recomputes this line's total and the parent event_budget's estimated_total —
-    never trusts a client-supplied total. Owns its own transaction."""
     line = await db.get(BudgetLineItem, line_id)
     if line is None or line.event_budget_id != budget_id:
         raise LookupError(f"line item {line_id} not found under budget {budget_id}")
@@ -459,8 +403,6 @@ async def get_headroom(
 
 
 async def get_burndown(db: AsyncSession, org_id: UUID, semester: str):
-    """Cumulative committed (approved event_budgets, by creation date) and actual
-    (reimbursed/approved expenses, by spent_at) over the semester."""
     budget_row = (
         await db.execute(
             select(Budget).where(Budget.org_id == org_id, Budget.semester == semester)
@@ -508,15 +450,13 @@ async def get_burndown(db: AsyncSession, org_id: UUID, semester: str):
 
 
 async def get_variance(db: AsyncSession, org_id: UUID):
-    """Estimated vs. actual per matched (expense, line_item) pair, across every
-    budget this org has ever had."""
     rows = (
         await db.execute(
             text(
                 """
                 SELECT e.title AS event_title, bli.category AS category,
-                       bli.description AS description, bli.line_total AS estimated,
-                       ex.amount AS actual
+                        bli.description AS description, bli.line_total AS estimated,
+                        ex.amount AS actual
                 FROM expenses ex
                 JOIN budget_line_items bli ON bli.id = ex.line_item_id
                 JOIN event_budgets eb ON eb.id = ex.event_budget_id

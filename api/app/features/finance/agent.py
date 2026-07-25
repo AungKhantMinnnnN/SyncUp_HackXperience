@@ -1,15 +1,4 @@
-# api/app/features/finance/agent.py
-"""LLM tool for budget drafting (doc §5, CLAUDE.md "LLM proposes, Python decides").
 
-The model proposes line items (category, description, unit_cost, quantity) and
-ranks dispensable cuts when over budget. It NEVER computes a total, a subtotal, or
-a contingency figure — that arithmetic lives in service.py / headroom.py, entirely
-in Decimal. The JSON schemas below deliberately have no total/subtotal field.
-
-Uses the existing Foundry hosted-agent wrapper in app.core.llm — no new Azure/Foundry
-client is created here, and azure.ai.projects / azure.identity are never imported in
-this module.
-"""
 
 import time
 from decimal import Decimal
